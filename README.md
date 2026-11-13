@@ -47,7 +47,7 @@ The **KarPur Launcher** does all the building for you.
 | 🟢 | **Update 4.0.0 as `.nsp`** | Tested; the only supported update |
 | 🟡 | ***Pokémon Scarlet*, base game as `.xci`** | Works according to community reports; not tested by the maintainer |
 | 🟢 | **DLC as `.nsp`** (optional) | Confirmed working, including the story areas |
-| 🟡 | **Base game as `.nsp`** (an eShop copy, or an `.xci` converted from one) | Works with a **firmware folder**: the system fonts come from the cartridge image, so an eShop copy needs your console's system files for them (the launcher's *Firmware folder*) |
+| 🟡 | **Base game as `.nsp`** (an eShop copy, or an `.xci` converted from one) | Merges with the update since launcher 0.3.5 (#40). It also needs a **firmware folder**: the system fonts come from the cartridge image, so an eShop copy takes them from your console's system files (the launcher's *Firmware folder*) |
 | 🔴 | Other updates than 4.0.0 | Not tested so not supported |
 
 You also need **`prod.keys`** from the same console.
@@ -79,7 +79,7 @@ You also need **`prod.keys`** from the same console.
 | ✅ | M0-M3 | Foundation, tools, the code translator, first sign of life |
 | ✅ | M4 | First picture through Vulkan |
 | ✅ | M5 | Playable |
-| 🔄 | **M6** | **PC extras**: 60 FPS ✅, DLSS / DLAA / Frame Generation ✅, launcher ✅, settings ✅, shader pre-build ✅, DLC ✅, a real AMD/weaker-GPU option (FSR 1 + Handheld mode) ✅, draw distance |
+| 🔄 | **M6** | **PC extras**: 60 FPS ✅, DLSS / DLAA / Frame Generation ✅, launcher ✅, settings ✅, shader pre-build ✅, DLC ✅, a real AMD/weaker-GPU option (FSR 1 + Handheld mode) ✅, shadow quality ✅, draw distance |
 
 Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](docs/progress.md)
 
@@ -87,6 +87,9 @@ Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](doc
 
 ### 🎮 Smooth play
 - **60 FPS**, with the game's speed kept right, smooth effects and smooth walking indoors. 90, 120 and 144 FPS are available as experimental limits.
+- **Stutter reduction** (Settings tab, off by default, experimental): two contributed changes (#49, #53) that let a
+  window image be acquired again at its display time and let threads run without a virtual core until they ask for
+  their core number. Measured as an improvement in play, but new, so they stay off until more people have tried them.
 - **All shaders prepared during the build:** about 36,000 shaders from your own game files are translated and handed to the graphics driver ahead of time. New areas, Pokémon and attacks appear without the stutter of first-time shader builds.
 
 ### ✨ Picture
@@ -99,6 +102,10 @@ Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](doc
   and other non-NVIDIA cards, no reverse engineering required.
 - A **Graphics card** setting (Settings tab) picks which GPU runs the game when more than one is installed; NVIDIA-only
   features lock themselves off automatically once you pick a non-NVIDIA card.
+- **Shadow quality** (Settings tab): the game's own sun shadow map is 1024×1024. x2, x3 and x4 take it up to
+  4096×4096, which removes most of the jagged edges on shadows, and **Disabled** skips the shadow pass completely.
+  It costs the game no memory: the map is reported to the game as the original size, so nothing is taken from the
+  streaming it does for NPCs and wild Pokémon.
 - The HUD always stays as the game draws it.
 
 ### 🌿 A livelier Paldea
@@ -112,6 +119,14 @@ Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](doc
 | Extreme | 120 | screenshots; can drop to about 35 FPS |
 
 Switch 2 uses the spawn values of the fan mod [Pokémon Compass](https://compass.seri.studio) by Aria Seri and Kas Seri. The higher levels only raise the count. KarPur contains these numbers, none of the mod's files.
+
+**No version exclusives** (off by default): the wild Pokémon that are exclusive to the other edition spawn in yours
+as well — 66 spawn entries across Paldea, Kitakami and the Blueberry Academy, including the version-split paradox
+Pokémon and Tauros' two breeds. Your own edition's Pokémon are unaffected.
+
+**No trade evolutions** (off by default): the 28 evolutions that can only happen through a trade work without one.
+16 of them on reaching a level, 12 by holding the item they needed and gaining a level. Both settings change values
+in the data your own copy of the game already contains; KarPur adds none.
 
 ### 🕹️ Controls
 - **Mouse and keyboard or controller**; the mouse turns the camera.
@@ -131,7 +146,7 @@ Switch 2 uses the spawn values of the fan mod [Pokémon Compass](https://compass
 - **One file**: no installation and no administrator rights.
 - **Home**: a start page in your edition's colours, with Play, the state of your build, your last save and **your current team** (name and level, read when the game saves) at a glance.
 - **Setup**: builds the game from your dumps, shaders included. A stopped build goes on where it stopped.
-- **Settings**: everything from fullscreen and your graphics card to Frame Generation, before you start the game.
+- **Settings**: everything from fullscreen and your graphics card to Frame Generation, shadow quality, how many wild Pokémon appear and the two Pokémon settings above, before you start the game.
 - **Controls**: keyboard, mouse and controller, with swapped sticks and an inverted camera.
 - **Saves**: export your save as a `.zip`, import one, open its folder, or restore one of the last saves.
 - **Mods** (experimental, only a few mods tried so far): add your own mods (a folder or a `.zip`, for example from NexusMods) and switch each on or off. Nothing of your game is replaced: KarPur gives the game a mod's file as it loads the original. Mods that only change files work; files a mod adds and a mod's code (`exefs`) are not supported yet, and the tab says so per mod.
@@ -142,7 +157,7 @@ Switch 2 uses the spawn values of the fan mod [Pokémon Compass](https://compass
 
 1. **Download** `KarPur-Launcher.exe` from the [releases page](https://github.com/Grunttanamo/KarPur/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*.
 2. **Choose your files** in the *Setup* tab:
-   - the base game (`.xci`)
+   - the base game (`.xci`, or an eShop `.nsp` together with a *Firmware folder*)
    - the update and DLC (`.nsp`)
    - `prod.keys`
    - a **target folder without spaces**
@@ -179,6 +194,14 @@ Please also send us a report (see below), so we can find the cause.
 </details>
 
 <details>
+<summary><b>The build stops at the linking step with "Permission denied"</b></summary>
+
+The game is still running from that folder and holds `karpur.exe` open, so the new one cannot be written (#48).
+Close the game and press **Repair** or **Update** again. The message names the cause in its last line, but it
+arrives as a compiler error, which hides it.
+</details>
+
+<details>
 <summary><b>The build stops at "Self-test"</b></summary>
 
 Exit code `3221225501` means that the processor lacks an instruction set the build used (AVX2). Current builds detect this and build for your processor. Support for CPUs without AVX2 is **a test run**: the game builds and starts, and launcher 0.3.2 makes its math much faster there, but it has hardly been tried. Please tell us in a report how it runs (your CPU and the FPS). Press **Repair** in the launcher after updating it. If the self-test still fails, please send us the launcher log.
@@ -201,7 +224,9 @@ You add a few words, and with *Attach log* the end of the game's log. **Open on 
 ## Known limits
 
 - The game renders at 1920 × 1080; DLSS gives a sharper picture at higher window sizes. A higher native resolution is not done yet.
-- Online features (Union Circle, trading, Tera Raid matchmaking) are not available.
+- Online features (Union Circle, trading, Tera Raid matchmaking) are not available. The evolutions that would need
+  a trade have an offline route instead (**No trade evolutions** in Settings); four of them take a level rather
+  than their own item, because the game cannot name those items in an evolution condition.
 - DLC is confirmed to work, including the story expansions.
 - Draw distance settings for trees, grass, Pokémon and NPCs are not done yet.
 - No temporal AMD upscaler (FSR 2) or frame generation yet; FSR 1 plus Handheld mode is the real performance option for now.
