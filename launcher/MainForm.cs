@@ -30,13 +30,22 @@ partial class MainForm : Form
     // reported that TOTK_SUBMIT_DEFER=0 fixes it; far trees may flicker a little and the frame rate can drop.
     readonly CheckBox safeSubmit = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Card,
                                            Text = "Compatibility mode (try it if the game crashes after the character creation)" };
+    readonly CheckBox noExclusives = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Card,
+                                           Text = "No version exclusives (the other edition's wild Pokémon spawn here too)" };
+    readonly CheckBox noTradeEvo = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Card,
+                                           Text = "No trade evolutions (they evolve on a level, holding the item they needed if there was one)" };
     readonly ComboBox windowSize = Combo(), fpsLimit = Combo(), present = Combo(), upscaler = Combo(), overlay = Combo(),
                       population = Combo(), colour = Combo(), antiAliasing = Combo(), dlssModel = Combo(), frameGen = Combo(),
-                      gpu = Combo(), opMode = Combo(), shadowRes = Combo();
+                      gpu = Combo(), opMode = Combo(), shadowRes = Combo(), stutter = Combo();
     readonly Label gpuNote = Theme.Label("", 9.5f, muted: true);
     readonly Dictionary<Control, Label> rowLabels = new();
     readonly Button addStreamline = Theme.Button("Add Streamline files", glyph: Theme.GlyphFolder);
     readonly Label fgNote = Theme.Label("", 9.5f, muted: true);
+    readonly Label stutterNote = Theme.Label(
+        "Experimental timing changes that can smooth out the hitches when the game streams in Pokémon and "
+        + "objects. Standard starts the next frame earlier; Aggressive also lets threads share the "
+        + "processor cores more freely, which the console does not do. Leave this off if anything looks "
+        + "wrong.", 9.5f, muted: true);
     readonly Button addDlss = Theme.Button("Add nvngx_dlss.dll", glyph: Theme.GlyphFolder);
     readonly Label dlssNote = Theme.Label("", 9.5f, muted: true);
     readonly TrackBar sharpness = new FocusSlider { Minimum = 0, Maximum = 100, TickFrequency = 10, Width = 280, BackColor = Theme.Card };
@@ -95,8 +104,14 @@ partial class MainForm : Form
         { ("switch", "Switch (15, default)"), ("switch2", "Switch 2 (40)"), ("enhanced", "Enhanced (80)"),
           ("extreme", "Extreme (120, can lower the frame rate)") };
     static readonly (string, string)[] Colours = { ("auto", "Automatic (from your game)"), ("violet", "Violet"), ("scarlet", "Scarlet") };
+    // Two runtime switches behind one row (contributed in #49 and #53): both are off by default, and the
+    // launcher writes both so a level is unambiguous. Power users can still set either on its own in the ini.
+    static readonly (string, string)[] Stutters =
+        { ("off", "Off (default)"), ("standard", "Standard (experimental)"),
+          ("aggressive", "Aggressive (experimental)") };
     static readonly (string, string)[] ShadowReses =
-        { ("0", "Original (1024×1024)"), ("2048", "x2 (2048×2048)"), ("3072", "x3 (3072×3072)"), ("4096", "x4 (4096×4096)") };
+        { ("0", "Original (1024×1024)"), ("2048", "x2 (2048×2048)"), ("3072", "x3 (3072×3072)"), ("4096", "x4 (4096×4096)"),
+          ("off", "Disabled (no sun shadows)") };
 
     readonly string startTab;
 
@@ -373,6 +388,7 @@ partial class MainForm : Form
         Fill(population, Populations);
         Fill(colour, Colours);
         Fill(shadowRes, ShadowReses);
+        Fill(stutter, Stutters);
         var sharp = new FlowLayoutPanel { AutoSize = true, BackColor = Theme.Card, Margin = new Padding(0) };
         sharpnessValue.Margin = new Padding(6, 6, 0, 0);
         sharp.Controls.Add(sharpness);
@@ -410,6 +426,12 @@ partial class MainForm : Form
         SettingRow(grid, "Performance overlay", overlay);
         SettingRow(grid, "Shadow quality", shadowRes);
         SettingRow(grid, "Wild Pokémon", population);
+        SettingRow(grid, "", noExclusives);
+        SettingRow(grid, "", noTradeEvo);
+        SettingRow(grid, "Stutter reduction", stutter);
+        stutterNote.MaximumSize = new Size(560, 0);
+        stutterNote.AutoSize = true;
+        SettingRow(grid, "", stutterNote);
         SettingRow(grid, "Compatibility", safeSubmit);
         var look = Grid(2);
         look.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -873,9 +895,13 @@ partial class MainForm : Form
         Select(overlay, built ? ini.Get("perf_overlay") : null, "off");
         Select(population, built ? ini.Get("population") : null, "switch");
         Select(shadowRes, built ? ini.Get("shadow_res") : null, "0");
+        string ahead = (built ? ini.Get("acquire_ahead") : null) ?? "0", lazy = (built ? ini.Get("core_lazy") : null) ?? "0";
+        Select(stutter, lazy != "0" ? "aggressive" : ahead != "0" ? "standard" : "off", "off");
         safeSubmit.Checked = (built ? ini.Get("submit_defer") : null) == "0";
+        noExclusives.Checked = (built ? ini.Get("no_exclusives") : null) == "1";
+        noTradeEvo.Checked = (built ? ini.Get("no_trade_evo") : null) == "1";
         sharpness.Value = int.TryParse(built ? ini.Get("sharpness") : null, out int s) ? Math.Clamp(s, 0, 100) : 80;
-        foreach (Control c in new Control[] { fullscreen, windowSize, fpsLimit, present, opMode, upscaler, antiAliasing, addDlss, dlssModel, frameGen, addStreamline, overlay, population, shadowRes, safeSubmit, sharpness, saveSettings })
+        foreach (Control c in new Control[] { fullscreen, windowSize, fpsLimit, present, opMode, upscaler, antiAliasing, addDlss, dlssModel, frameGen, addStreamline, overlay, population, noExclusives, noTradeEvo, shadowRes, stutter, safeSubmit, sharpness, saveSettings })
             c.Enabled = built;
         settingsNote.Text = built ? "" : "Build the game first: the settings belong to its folder.";
         DlssStatus();
@@ -1015,6 +1041,11 @@ partial class MainForm : Form
             ini.Set("display", "perf_overlay", Value(overlay));
             ini.Set("display", "population", Value(population));
             ini.Set("display", "shadow_res", Value(shadowRes));
+            ini.Set("display", "no_exclusives", noExclusives.Checked ? "1" : "0");
+            ini.Set("display", "no_trade_evo", noTradeEvo.Checked ? "1" : "0");
+            string level = Value(stutter);
+            ini.Set("performance", "acquire_ahead", level == "off" ? "0" : "1");
+            ini.Set("performance", "core_lazy", level == "aggressive" ? "1" : "0");
             ini.Set("compatibility", "submit_defer", safeSubmit.Checked ? "0" : "1");
             ini.Save();
             settingsNote.Text = "Saved. They apply the next time the game starts.";

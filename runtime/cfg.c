@@ -41,7 +41,7 @@ static const char *const known[] = {
     "GPU_INDEX", "GPU_NAME", "HIGHFPS_FIX", "HOSTCALLS", "IND_BASE", "INDOOR_FIX", "INPUT", "INTERVAL_ONE", "INPUT_RECORD", "INPUT_SCRIPT", "LANG", "LIB_PREBUILD", "LUA_MOD", "LUA_MOD_FILE",
     "LIB_PREBUILD_KEEP", "LIB_PREBUILD_THREADS", "LOCALE", "LOD", "LOD_BIAS", "LOD_GUARD", "MEMORY", "MENU_LANG", "MENU_LOCK", "MIRROR_DEMOTE", "MIRROR_DEMOTE_MAX", "MIRROR_HOT", "MIRROR_LATE", "MIRROR_RACE", "MENU_TEST",
     "MENU_TEST_DIR", "MENU_TEST_SET", "MINIMAL_LAYOUT", "MIRROR_GAP", "MOD_DRY", "MOD_FILES", "MOD_VALUES", "MOTION", "MOUSE_SENS", "MOVIE_HOST", "MOVIE_PACE",
-    "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PATCH_BISECT", "PATCH_OUTPUT", "PATCH_SCENE", "PERF_OVERLAY", "PERF_SLOW_MS", "POPULATION", "PIPELINE_CACHE", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT", "POKE", "POKE_SCAN",
+    "ONE_PER_CORE", "OPERATION_MODE", "OUTPUT_RES", "PAD_LAYOUT", "PATCH_BISECT", "PATCH_OUTPUT", "PATCH_SCENE", "PERF_OVERLAY", "PERF_SLOW_MS", "POPULATION", "NO_EXCLUSIVES", "NO_TRADE_EVO", "PIPELINE_CACHE", "PIPE_MEMO", "PIPE_PREBUILD", "PIPE_SKIP", "PIPE_SYNC", "PIPE_WAIT", "POKE", "POKE_SCAN",
     "PASS_TIME", "COMPUTE_VRAM", "HOT_PASS", "XFB_MIRROR", "SKIP_MODE", "VB_VRAM", "PCIE_RANK", "VS_VRAM", "PRESENT_INTERVAL", "PREWARM_XLATE", "PROBE_MOVIE", "PROBE_MOVIE_SHOT", "PROFILE", "PROFILE_CHAINS", "PROFILE_DIR", "PROFILE_FRAMES",
     "PROFILE_MAIN", "PROFILE_RENDER", "PUSH_SKIP", "PUSH_STAGE", "RACE_SUBS", "RDOC", "RDOC_DIR", "RDOC_DLL", "UI_PATCH", "READBACK_GUARD", "READBACK_LOG", "READBACK_WATCH", "READ_MARK", "REALTIME", "REC_END", "REEXEC",
     "RENDER_SCALE", "REPLAY_ASYNC",
@@ -62,7 +62,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"SHARPNESS", "display"}, {"ASPECT", "display"}, {"LOD", "display"}, {"LOD_BIAS", "display"}, {"ANISO", "display"}, {"FOV", "display"}, {"COLOR_PRESET", "display"}, {"SHADOW_RES", "display"},
     {"COLOR_BRIGHTNESS", "display"}, {"COLOR_CONTRAST", "display"}, {"COLOR_SATURATION", "display"},
     {"COLOR_GAMMA", "display"},
-    {"DEVICE_PROFILE", "display"}, {"ASSUME_FOCUS", "display"}, {"POPULATION", "display"},
+    {"DEVICE_PROFILE", "display"}, {"ASSUME_FOCUS", "display"}, {"POPULATION", "display"}, {"NO_EXCLUSIVES", "display"}, {"NO_TRADE_EVO", "display"},
     {"MENU_LANG", "language"}, {"LANG", "language"}, {"OPERATION_MODE", "language"},
     {"VOLUME", "audio"},
     {"MOTION", "input"}, {"RUMBLE_STRENGTH", "input"}, {"RUMBLE_CURVE", "input"}, {"RUMBLE_TRIGGERS", "input"},
@@ -99,7 +99,7 @@ static const CfgMeta metas[] = {
     {"UPSCALER", "fsr", "fsr|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
     {"DLAA", "0", "0|1", RESTART}, {"DLSS_OUT", "game", NULL, LIVE}, {"DLAA_PRESET", "5", "0|5|10|11", RESTART}, {"FRAMEGEN", "0", "0|1|2|3|4", RESTART},   // game | window | <w>x<h> (vk_taa.c)   // NVIDIA DLAA (vk_dlaa.c, vk_taa.c): NGX needs its extensions when Vulkan starts
     {"ASPECT", "fit", "fit|stretch", LIVE}, {"FOV", "100", "70..140", LIVE},
-    {"SHADOW_RES", "0", "0|2048|3072|4096", RESTART},   // resolution.c res_shadow_init; 0: the game's own (1024)
+    {"SHADOW_RES", "0", "0|off|2048|3072|4096", RESTART},   // resolution.c res_shadow_init; 0: the game's own (1024)
     // Violet detail (lod.c, vk_texture.c), read at start
     {"LOD", "0", "0|1", RESTART}, {"LOD_BIAS", "-4", "-8..0", RESTART}, {"ANISO", "0", "0|2|4|8|16", RESTART},
     // colour adjustment (vk_color.c); the preset is the menu's, the four values are what the present uses
@@ -113,7 +113,10 @@ static const CfgMeta metas[] = {
     {"HIGHFPS_FIX", "1", "0|1", RESTART},
     {"LANG", "", "ja|en-US|fr|de|it|es|zh-CN|ko|nl|pt|ru|zh-TW|en-GB|fr-CA|es-419|zh-Hans|zh-Hant|pt-BR", RESTART},
     {"OPERATION_MODE", "docked", "docked|handheld", RESTART},
-    {"ASSUME_FOCUS", "1", "0|1", LIVE}, {"POPULATION", "switch", "switch|switch2|enhanced|extreme", RESTART},   // read on every focus change (ov_system.c)
+    {"ASSUME_FOCUS", "1", "0|1", LIVE},   // read on every focus change (ov_system.c)
+    {"POPULATION", "switch", "switch|switch2|enhanced|extreme", RESTART},
+    {"NO_EXCLUSIVES", "0", "0|1", RESTART},   // data_patch.c: both editions' exclusive wild Pokemon spawn
+    {"NO_TRADE_EVO", "0", "0|1", RESTART},   // data_patch.c: trade-only evolutions evolve on a level instead
     // Sound, Controls, Menu
     {"VOLUME", "100", "0..100", LIVE},
     {"MOTION", "1", "0|1", LIVE}, {"RUMBLE_STRENGTH", "130", "0..300", LIVE}, {"RUMBLE_CURVE", "0.6", "0.2..1.5", LIVE},

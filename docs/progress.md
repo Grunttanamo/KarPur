@@ -80,6 +80,190 @@
   that silently fails. The `FN_ENTER` hook point in `cpu.h` is how to reach it; reading is safe there, writing
   through a cached guest pointer is what went wrong on 2026-11-12 with the shadow work.
 
+## Issue #45: a build that stops after 75 minutes (2026-11-13)
+
+- A reporter's build lifted and compiled for 75 minutes and then ended with `ModuleNotFoundError: No module named
+  'romfs_index'` at `tools/build_game.py` line 36. The module is tracked and ships in the launcher's payload, so
+  it was there; what was missing is the search path. Python puts the script's own folder on `sys.path` only when
+  it is started the usual way - with `-P` or `-I`, or with `PYTHONSAFEPATH` set in the environment, it does not,
+  and then a tool importing a tool beside it fails. Reproduced exactly: `python -P -c "import romfs_index"` in
+  `tools/` gives that very message.
+- `build_game.py` and `romfs_index.py` now say where their siblings are
+  (`sys.path.insert(0, Path(__file__).resolve().parent)`), which 7 other tools in the tree already did; those two
+  were the only ones that imported a sibling without it. Checked with `-P`, `-I` and a normal start.
+- Not reproducible here otherwise, so what sets it on that machine is unknown (`PYTHONSAFEPATH` is the likely
+  one). The fix does not depend on knowing.
+
+## Evolutions: the species table's format, and what trading gates (2026-11-13)
+
+- For a "no trade evolutions" setting (offline, so trading cannot happen). The species table is
+  `avalon/data/personal_array.bin`, pack 799, Oodle-kraken, 122439 -> 412572 bytes; it has no schema in the
+  archive (`avalon/data/personal_array.bfbs` does not exist), so the layout below was read from the bytes.
+- Root: one field, a vector of 1424 entries. In an entry, field 0 is the species number, field 1 the form, and
+  **field 23 is a vector of 16-byte evolution structs**: `u16 level, u16 method, u16 argument, u16 x3, u16 target
+  species, u16`. Pack 21985 holds `world/data/battle/plib_item_conversion/plib_item_conversion_array.bin`
+  (865 -> 1604 bytes) with its own .bfbs, and `battle_item_conversion_array.bin` beside it.
+- The methods, read off the data rather than from a list: **4** level reached (the level is in the struct's first
+  field), **5 trade**, **6 trade holding an item** (argument a national item number), **8** use an item (argument
+  a small index of its own, not the national number: Pikachu is 4), **19 / 20** level up holding an item by day /
+  by night (small index too: Sneasel 49, Gligar 50, Happiny 9), **21** level up knowing a move (argument a move
+  number: Lickitung 205, Tangela 246, Aipom 458).
+- **Violet 4.0.0 has 12 plain trade evolutions** (Kadabra, Machoke, Graveler in two forms, Haunter, Boldore,
+  Gurdurr, Phantump, Pumpkaboo in four sizes) **and 16 trade-holding-an-item ones** (Poliwhirl, Slowpoke, Onix,
+  Rhydon, Seadra, Scyther, Electabuzz, Magmar, Porygon, Porygon2, Feebas, Dusclops, Clamperl twice, Spritzee,
+  Swirlix).
+- What the mod does (three files: the species table, the item conversion table, and `arc/data.trpfd`, which it
+  only needs because it replaces files inside the archive): it **adds** 45 evolution structs rather than changing
+  any. Haunter gets level 36; each trade-holding-an-item case gets a pair of methods 19 and 20 (day and night)
+  with the item's small index, and the five small indices that had no item number yet are filled in in the
+  conversion table. Diffing it field by field against the maintainer's own table is what showed this.
+- So the two groups need different work. Method 5 -> 4 with a level is a change **inside** the existing struct:
+  two bytes for the method, two for the level, no growth, a rule with nothing looked up. Method 6 needs the
+  item's small index, which Violet's own data does not hold for these items (that is exactly what the mod had to
+  fill in), so it cannot be derived from the game and is a decision rather than a transformation.
+- Built for the first group: `TOTK_NO_TRADE_EVO=1` (launcher: "No trade evolutions", off by default).
+  `data_patch.c evo_fix` walks the table after the decode and rewrites every method-5 struct, with the levels the
+  maintainer chose, each above the level the Pokemon itself appears at: Kadabra 40, Machoke 39, Graveler 36,
+  Haunter 42, Boldore 35, Gurdurr 40, Phantump 30, Pumpkaboo 30. A species with a trade evolution and no level
+  here is logged and left alone, so a new one in a later game version shows up instead of being guessed at.
+  Checked by replaying it on the maintainer's own table: all 12 structs rewritten (Graveler has two forms,
+  Pumpkaboo four sizes), no method 5 left, nothing outside the list touched. Not tested in play yet.
+- The second group, half of it: the small item space is `world/data/battle/plib_item_conversion` (pack 21985),
+  **`ItemTableArray { itemID, plibID }`** - 106 rows mapping a national item number to the plibID that every
+  method working without a trade uses. The game's own data proves it: plibID 1..6 are the national 80..85 (the
+  five stones), 7 and 8 the Shiny and Dusk Stone, 52 the Ice Stone, and Pikachu's method-8 argument is 4, the
+  Thunder Stone. So method 6 -> 8 with the argument translated is again a change inside the struct.
+  **8 of the 16 are done** this way (Rhydon, Seadra, Electabuzz, Magmar, Porygon, Porygon2, Feebas, Dusclops).
+- Method 8 was the first choice and was wrong: it means "the item is **used** on it", and none of these items can
+  be used at all, only held, so the evolution stayed as unreachable as trading had left it (the maintainer found
+  this in play). Only stones use method 8 in Violet's own data, which should have been the hint. It is method 19
+  now, "levels up by day holding the item" - the game's own way of evolving something that holds an item, proved
+  by its arguments resolving to the national 326 (Razor Claw, Sneasel) and 110 (Oval Stone, Happiny). There is no
+  variant without a time of day; 20 is the same by night, and one struct holds one method, so it is by day. The
+  mod writes both, which it can because it adds structs instead of changing them.
+- Dusclops is the maintainer's exception (`evo_item_own`): Gligar's Razor Fang (national 327, plibID 50) by
+  night, instead of the item its own row names. The seven others level up by day holding their own item.
+- The other 8 name an item with **no plibID** (the King's Rock, the Metal Coat, both Deep Sea items, the Sachet
+  and the Whipped Dream): the table has 32 rows that hold a plibID and no item at all, and giving one an item
+  means writing a FlatBuffer field that is absent, which needs the file rewritten - what the mod does, filling
+  five such rows. So those eight keep the condition but get **another item**, which the maintainer chose from the
+  73 the game can name (`evo_item_own`, keyed on species and target, since Clamperl has two of these and they
+  must stay apart). All 16 are covered now and nothing is left alone.
+- A substitute item did not always work. The Metal Alloy (plibID 119), chosen for Onix and Scyther, did nothing
+  in play. One cause was found and removed: 119 sits in a row with that item **and** in one of the 33 item-less
+  rows, the only plibID of the thirteen used here that was not unique, so which row a lookup finds is luck.
+  Moving the item-less row's plibID out of the way (a four-byte write; the field is there, and nothing can look
+  that row up by item since it has none) still did not evolve it, so there is more to it - a plibID above the 118
+  the game itself uses, or an item it will not accept in a condition, both untested.
+- So Onix, Scyther, Spritzee and Swirlix take a level instead and no item at all (`evo_item_level`, the
+  maintainer's levels: 40, 30, 20, 20), and the duplicate-row fix came out again rather than write to game data
+  for nothing. Poliwhirl, Slowpoke and Clamperl keep a substitute item, which is untested.
+- The item names came from the game's own text: `message/dat/German/common/itemname` (pack 12614, the AHTB labels
+  are `ITEMNAME_<national number>`, so the label itself carries the number) decoded with `tools/msgpatch.py`'s
+  reader - base the section start, key the line index, which a known item confirmed (number 83 decodes to
+  Donnerstein, the Thunder Stone, whose plibID is 4, Pikachu's argument). Only numbers are written down here.
+- Checked by replaying both halves on the maintainer's table: 12 on a level, 8 on an item, 8 left, and no method
+  5 or usable method 6 remaining. Not tested in play yet.
+
+## Sun shadows off, and where version exclusives are not (2026-11-13)
+
+- `TOTK_SHADOW_RES=off` (launcher: Shadow quality "Disabled"): `vk_exec_draw.c shadow_pass_off` drops every draw
+  whose only attachment is the square depth target of the shadow map's side (`res_shadow_map_side`), so the map
+  keeps the value it was cleared to, the depth test finds nothing in front of the sun and nothing is shadowed. No
+  patch in the game is needed, and the whole shadow pass becomes work the GPU never does. **Tested: works.**
+- Looked for where version exclusives are decided, for a "no version exclusives" setting. The spawn data is
+  `arc/worlddataencountsettingsettingdata.bin` (pack 21993, 44 files; `trpfs.py --watch "encount|wild_pokemon"`,
+  then `--report` with the pack's own .bfbs). The species tables are `EncountPokeData[_lc|_su1|_su2]Array` ->
+  `values [n x EncountPokeData_*]` with `devid`, `minlevel`, `maxlevel`, `biome1/2`, `lotvalue1/2`, `locationName`,
+  `enabletable`, `timetable`, `flagName`, `outbreakLotvalue` and **`versiontable { A: bool, B: bool }`** — which
+  looks exactly like the switch we want.
+- It is not. Across every encounter table in Violet's archive (1021 entries, 526 distinct `devid`, up to 1024)
+  **no `A` or `B` is false**, and `flagName` only ever names story progress (`FSYS_SCENARIO_GAME_CLEAR` and the
+  like). The data is the same for both editions: Armarouge (#936, Scarlet's exclusive) has an entry in Violet with
+  no flag of any kind, as do both version-split paradox Pokemon (#1009 and #1010).
+- **It is the versiontable after all.** An exclusive does not store `false` for the other edition: the field is
+  **absent**, and FlatBuffers then answers with the default. Larvitar (#246, Scarlet) has `A = 1` and no `B`;
+  Bagon (#371, Violet) has `B = 1` and no `A`; everything else has both. Counting values present per field hid
+  this twice over: absent fields are skipped, and there are exactly as many Scarlet as Violet exclusives, so the
+  totals matched (426 and 426 in the 449-entry table). Checking the two halves of a known pair one by one is what
+  showed it. A probe over the personal table's fields (`TOTK_EXCL_PROBE`, `shader_census.c`) found nothing there,
+  as expected in hindsight: four fields "split every pair", but each had 32-40 distinct values (sizes, base stats),
+  not the two or three an edition flag would have.
+- Entry fields, for later: `devid, sex, formno, minlevel, maxlevel, lotvalue, biome1..4 + lotvalue1..4, area,
+  locationName, minheight, maxheight, enabletable, timetable, flagName, bandrate, bandtype, bandpoke, bandSex,
+  bandFormno, outbreakLotvalue, pokeVoiceClassification, versiontable, bringItem`; `VersionTable { A, B }` in
+  slots 0 and 1. The species tables are the three `pokedata*_array.bin` of that pack (449, 252 and 254 entries);
+  Pokemon Compass replaces them with 588, 258 and 335 entries and both flags written out on every one.
+- **The fix needs no file rewrite.** A FlatBuffer table reaches its fields through a vtable, and an absent field
+  has a 0 there. Writing the present flag's vtable entry into the absent one's makes both flags read the same
+  byte, which is the stored `1`: two bytes per exclusive entry, exactly what `data_patch.c` can already do
+  (`oodle <packed> <unpacked> <fnv> <offset> u16 mod=<value>`). Vtables are shared between tables of the same
+  shape, which here is what we want, but a tool must check that nothing other than a `versiontable` uses the one
+  it patches.
+- First attempt, wrong and quietly harmful: pointing each absent flag's own vtable slot at the stored flag. It
+  applied (the log showed all six bytes written) and changed nothing in play. Simulating the patch on the dumped
+  table showed why, and that one check is what should have come before shipping it: the exclusives use **two**
+  vtables, and one of them is **six bytes long** - it has no slot for the other edition's flag at all. Writing
+  "its" slot wrote two bytes past the vtable, into whatever follows. Nothing crashed, but it was corruption.
+- What works: in both vtables the stored flag sits at the same offset in the entry (+7). So the vtable that has
+  room for both slots gets its absent slot pointed at that offset, and the entries whose vtable is too short get
+  their vtable reference pointed at that one instead. `runtime/data_patch.c excl_fix` walks the table and does
+  this itself rather than carrying written-down offsets, so another game version needs no new numbers, and it
+  leaves the file alone unless it looks exactly as described. The three tables are named by unpacked size and the
+  fingerprint of their packed bytes. `TOTK_NO_EXCLUSIVES=1` (launcher: "No version exclusives", off by default);
+  `TOTK_NO_EXCLUSIVES=<path>` takes a list `tools/exclusives.py` wrote, which now follows the same steps.
+- Checked by replaying the fix on all three dumped tables: 252, 254 and 449 entries, **every one** of them
+  readable as available in both editions afterwards, 66 freed, nothing left over. **Tested in play: works** (a
+  Pupitar, Scarlet's, found in Violet). The log names the counts per table, so a file that does not match is
+  visible at once: "46 of 449 entries freed (23 pointed at the other vtable), flag at +7".
+- A mod that does only this (three replaced `pokedata*_array.bin`) turned out to make the same change - both flags
+  written out on all 449 entries - and additionally raises 231 `lotvalue` weights, which is a rarity boost and no
+  part of the edition logic. Comparing every field of it against the original is what confirmed that nothing else
+  is involved.
+- Still open: the Pokedex shows no habitat for a freed Pokemon (a "?"). That list is its own data, not these
+  tables, and the mod has the same gap.
+- The `TOTK_EXCL_PROBE` probe is removed again: the personal table is ruled out as the place, and this records it.
+- The species the tool found are the published exclusive list, which is the check that it found the right thing:
+  Paldea 128 (Tauros' fire and water breeds are version-bound too), 200, 246, 247, 316, 317, 371, 372, 425, 426,
+  429, 434, 435, 633, 634, 690-693, 765, 766, 874, 875, 885, 886 and the paradox Pokemon 978-993; Kitakami 190,
+  207, 313, 314, 845, 877; the Indigo Disk 27, 37, 311, 312, 408, 410.
+- Not tested in play yet.
+
+## Shadow sizes, the actual fix: the map costs the game nothing (2026-11-13)
+
+- The two entries below are **superseded**. Growing the game's GPU memory pool to pay for a bigger shadow map was
+  the wrong track from the start, and every symptom chased since came from it.
+- What it looked like: with any size above the game's own, NPCs in towns vanished a step or two away and came back
+  when walked up to, and wild Pokemon did the same in the open world. More pool made it worse, less made it better,
+  and at 4096 no value satisfied towns and the open world at once.
+- First hypothesis, wrong: the game carves fixed heaps from a `HeapDef` table and never looks at the application
+  pool, so the pool should grow with it. Violet has no such table (the path is TotK's; the log says `HeapDef …
+  missing`), and the change was a no-op. Second hypothesis, also wrong: the pools are carved at fixed offsets of one
+  parent, so a bigger one overlaps its neighbour. A probe of every pool above 32 MiB
+  (`TOTK_SHADOW_PROBE`, `nvn_api_core.c`) showed them laid end to end with the neighbour simply moving up — no
+  overlap, the room really is added.
+- What settled it was measuring the draw distance in one spot with each switch on its own. The game's own
+  behaviour is about **30 m**; normal shadows with a 448 MiB pool gave **2-3 m**; a bigger shadow map with the pool
+  untouched gave 30 m but crashed on load, because the map does not fit. So the pool was the cause, not the map.
+  The sizes in the table at main+0x146e6xx add up to roughly 3040 MiB of the 3285 MiB application pool: the game
+  budgets what is left for streaming, and the 180 MiB we took at 4096 came off exactly that.
+- **The fix: tell the game the truth it needs and no more.** `nvnTextureBuilderGetStorageSize`
+  (`runtime/nvn_api_obj.c`, `storage_size_for_game`) reports a patched shadow map as the 1024 map it replaces — 4
+  MiB instead of 128 at 4096. Its storage in the game's pool is bookkeeping for a depth target the CPU never reads
+  and the back end holds as its own image, so nothing in the game depends on the number being real. The game's
+  pool, its heaps and its streaming budget stay exactly as shipped, and the map costs it nothing.
+- Removed with it: `TOTK_VRAM_POOL_MIB`, `res_vram_pool_add` / `res_vram_pool_init`, the `vrampool` patch site in
+  `tools/fps_patches.py`, and the shadow extra in `res_heap_extra_bytes`. `res_heap_extra_kib` and the `HeapDef`
+  rewrite are back to serving the resolution settings alone.
+- **Tested through the launcher: 2048, 3072 and 4096 all run, the shadows are sharp, and NPCs in towns and wild
+  Pokemon in the open world behave as the game's own build does.** Not committed.
+- Lesson, the second time this bit: a diagnostic switch must be read with `rt_knob`, not `cfg_int`. `cfg_int`
+  answers from the environment first and only then needs a row in the settings table, so a probe read with it runs
+  fine under `$env:TOTK_…=1` and kills the game at start for anyone who does not set the variable — which is every
+  launcher start. Found after the maintainer could not start the game from the launcher at all; every `cfg_int` and
+  `cfg_value` key in `runtime/` was then checked against the table (all have rows; the lenient `cfg_get` needs
+  none). Test the launcher path, not only the environment-variable path: the launcher is how the game is played.
+
 ## Shadow sizes, the real fix: measure the cost, add the room, do not take it (2026-11-12)
 
 - The entry below declared the four sizes working after the `vrampool` patch. They were not. Playing properly
