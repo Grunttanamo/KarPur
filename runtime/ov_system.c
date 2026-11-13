@@ -344,13 +344,58 @@ static const char *abort_name(uint64_t a, char *out, int cap) {
     return slash ? slash + 1 : out;
 }
 
+// A Lua error object left on a state's stack. Lua 5.4 keeps the stack top at +16 of lua_State, a slot is a 16-byte
+// TValue (value, then tag), a short string's length sits at +11 of its TString and a long one's at +16, and the
+// characters start at +24 — the same layout runtime/lua_mod.c reads and documents. Every access goes through
+// plat_mem_read because the state pointer here is guessed from the registers at the abort, and the text is cut at
+// the first character that is not printable ASCII: a script engine's own error ("attempt to call a nil value" and
+// the like) is a diagnostic, the kind of name this log already carries, not text of the game's.
+static int lua_error_text(uint64_t L, char *out, size_t cap) {
+    out[0] = 0;
+    if (!L || L >= RT_ADDRESS_LIMIT || (L & 7)) return 0;
+    uint64_t top = 0, gc = 0, n = 0;
+    uint8_t tag = 0;
+    if (!plat_mem_read(L + 16, &top, 8) || !top || top >= RT_ADDRESS_LIMIT || (top & 7) || top < 16) return 0;
+    if (!plat_mem_read(top - 16, &gc, 8) || !plat_mem_read(top - 8, &tag, 1)) return 0;
+    if ((tag != 0x44 && tag != 0x54) || !gc || gc >= RT_ADDRESS_LIMIT) return 0;
+    if (tag == 0x44) {
+        uint8_t short_len = 0;
+        if (!plat_mem_read(gc + 11, &short_len, 1)) return 0;
+        n = short_len;
+    } else if (!plat_mem_read(gc + 16, &n, 8)) {
+        return 0;
+    }
+    if (!n) return 0;
+    if (n >= cap) n = cap - 1;
+    if (!plat_mem_read(gc + 24, out, (size_t)n)) return 0;
+    out[n] = 0;
+    for (size_t i = 0; i < n; i++)
+        if (out[i] < ' ' || out[i] > '~') { out[i] = 0; break; }
+    return out[0] != 0;
+}
+
 // KarPur: void nn::diag::detail::AbortImpl(const char *condition, const char *function, const char *file, int line,
 // const char *format, ...): the SDK's abort with a source position. The log names the function, the file's base name
 // and the line (names and numbers only; the condition and message text stay out); then the abort runs as before.
 static void obs_abort_impl(Cpu *c) {
     char fn[128], file[160], at[160];
     const char *f = abort_name(arg_x(c, 1), fn, sizeof fn), *p = abort_name(arg_x(c, 2), file, sizeof file);
-    rt_log("guest abort in %s (%s line %d), called from %s", f, p, (int)arg_x(c, 3), caller(c, at, sizeof at));
+    // The message's own arguments say which item the abort is about. The two that are usually identifiers go
+    // through abort_name, the same filter the function and file names use: it takes the base name, stops at the
+    // first character that is not printable ASCII and answers "(not a name)" otherwise, so a message or any other
+    // text of the game's does not reach the log. The third is printed as a number and never dereferenced.
+    char a5[96], a6[96];
+    rt_log("guest abort in %s (%s line %d), called from %s; %s %s %#llx", f, p, (int)arg_x(c, 3),
+           caller(c, at, sizeof at), abort_name(arg_x(c, 5), a5, sizeof a5), abort_name(arg_x(c, 6), a6, sizeof a6),
+           (unsigned long long)arg_x(c, 7));
+    // An abort out of the scripting layer (invoker.h) means a Lua call returned an error and the error object is
+    // still on that state's stack; the state is in one of the callee-saved registers here, so try them in turn.
+    char err[200];
+    for (int r = 19; r <= 28; r++)
+        if (lua_error_text(c->x[r], err, sizeof err)) {
+            rt_log("guest abort: lua error on the state in x%d: %s", r, err);
+            break;
+        }
     rt_original(c);
 }
 
@@ -1054,3 +1099,4 @@ HOST_OVERRIDE("_ZN2nn7account37AsyncNetworkServiceLicenseInfoContextC1Ev", ov_ns
 HOST_OVERRIDE("_ZN2nn7account37AsyncNetworkServiceLicenseInfoContextC1EOS1_", ov_nsa_nothing);
 HOST_OVERRIDE("_ZN2nn7account37AsyncNetworkServiceLicenseInfoContextaSEOS1_", ov_nsa_this);
 HOST_OVERRIDE("_ZN2nn7account37AsyncNetworkServiceLicenseInfoContext28GetNetworkServiceLicenseKindEv", ov_nsa_zero);
+

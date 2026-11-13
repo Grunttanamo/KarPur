@@ -209,10 +209,42 @@ static void tex_release(tex_t *o) {
     gfx_backend()->texture_release(o);
 }
 
+// TOTK_SHADOW_PROBE=1 (diagnostic, off): no shadow-map size setting exists yet. Logs the first call from each
+// distinct (call chain, size) that initializes a depth-format texture, to find which one(s) build the game's
+// shadow maps (a fixed small square render target drawn into every frame, not the main scene); keyed on size too,
+// since a shared helper may build several differently-sized depth targets from the same call site. Walks the
+// frame-pointer chain up several levels (value_scan.c's watch_write does one: x[29] -> {saved x29, saved x30}),
+// since the immediate caller and its own caller both turned out to be shared "make a render target" helpers used
+// for the main scene chain too.
+#define SHADOW_PROBE_UP 6
+static void shadow_probe_note(Cpu *c, uint32_t w, uint32_t h, int fmt) {
+    if (!rt_knob("SHADOW_PROBE", "0")) return;
+    if (fmt < NVN_FORMAT_STENCIL8 || fmt > NVN_FORMAT_DEPTH32F_STENCIL8) return;
+    static struct { uint64_t chain[SHADOW_PROBE_UP]; uint32_t w, h; } seen[64];
+    static int n;
+    uint64_t chain[SHADOW_PROBE_UP] = {0};
+    chain[0] = c->x[30] - 4;
+    uint64_t fp = c->x[29];
+    for (int i = 1; i < SHADOW_PROBE_UP; i++) {
+        uint64_t fr[2];
+        if (!fp || (fp & 7) || !plat_mem_read(fp, fr, 16) || !fr[1]) break;
+        chain[i] = fr[1] - 4;
+        fp = fr[0];
+    }
+    for (int i = 0; i < n; i++)
+        if (!memcmp(seen[i].chain, chain, sizeof chain) && seen[i].w == w && seen[i].h == h) return;
+    if (n < (int)(sizeof seen / sizeof *seen)) seen[n++] = (typeof(seen[0])){{0}, w, h}, memcpy(seen[n - 1].chain, chain, sizeof chain);
+    char line[900], one[160];
+    size_t o = (size_t)snprintf(line, sizeof line, "shadow probe: depth texture %ux%u fmt=%#x from", w, h, fmt);
+    for (int i = 0; i < SHADOW_PROBE_UP && chain[i] && o < sizeof line - 170; i++)
+        o += (size_t)snprintf(line + o, sizeof line - o, "%s%s", i ? " <- " : " ", ldr_describe(chain[i], one, sizeof one));
+    rt_log("%s", line);
+}
 // NVNboolean nvnTextureInitialize(NVNtexture *t, const NVNtextureBuilder *b)
 NVN_API(nvnTextureInitialize) {
     tex_t *o = arg_p(c, 0);
     const tex_builder_t *s = arg_p(c, 1);
+    shadow_probe_note(c, s->d.width, s->d.height, s->d.format);
     if (o->magic == NVN_TEX_MAGIC && o->serial) {   // initialized again without Finalize: release the old serial
         NVN_LOG("texture %p initialized again without Finalize (serial %llu released)", (void *)o,
                 (unsigned long long)o->serial);
@@ -226,6 +258,12 @@ NVN_API(nvnTextureInitialize) {
     o->has_layout = s->has_layout;
     memcpy(o->layout, s->layout, 8);
     nvn_tex_layout(&o->d, &o->L);
+    // TOTK_SHADOW_PROBE, continued: what a depth target actually costs, to size the GPU memory pool the shadow map
+    // shares with the rest of the game from a measurement instead of an assumed layer count (resolution.c).
+    if (o->d.format >= NVN_FORMAT_STENCIL8 && o->d.format <= NVN_FORMAT_DEPTH32F_STENCIL8 && rt_knob("SHADOW_PROBE", "0"))
+        rt_log("shadow probe: depth texture %ux%u fmt=%#x target=%d depth=%u levels=%u samples=%u -> %llu KiB",
+               o->d.width, o->d.height, o->d.format, o->d.target, o->d.depth, o->d.levels, o->d.samples,
+               (unsigned long long)(o->L.size >> 10));
     o->mem = s->pool && s->pool->mem ? s->pool->mem + s->off : NULL;
     if (s->pkg_data) {
         if (!o->mem || nvn_gpu_only((uintptr_t)o->mem))

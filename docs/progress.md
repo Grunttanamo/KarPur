@@ -1,5 +1,236 @@
 # Progress
 
+## Pokedex crash: narrowed to an unregistered handler, not fixed (2026-11-12)
+
+- Sharper reproduction from the maintainer, which changes the picture from the entry below: it is **not** about
+  Tauros and **not** about opening an entry. Opening one works, A (details) works, + (habitat) works — **paging to
+  the next entry with left/right crashes, on every entry**. It happens with and without any mod.
+- The abort is always `CallImpl (invoker.h line 137)` from `main+0xb5d92c`: invoking a delegate that was never
+  bound. `obs_abort_impl` now also prints the message's own arguments through the existing name filter, and they
+  are two 64-bit hashes (`C3B091777E3EC94A5`, `SE94F3E13286232CF`) plus an object pointer — this game keys things
+  by hashed name everywhere, so the game is asking for a handler under a name nothing registered.
+- Ruled out along the way: it is not a load that never finishes (the probe's "slot 2 still loading" lines all
+  belong to opening the page, and **no file access happens at all** in the frames before the abort, so paging
+  loads nothing); it is not KarPur's own Lua extension (`TOTK_LUA_MOD=0` still crashes); it is not the spawn mod.
+- Where it lives: the crashing function is `f_7000b5d450` (`main+0xb5d450`..`0xb5d960`), a delegate invoker that
+  takes four arguments. `lua_pcallk` (`main+0xb5ddd0`, known from the `lua_mod` patch) is its neighbour, so this is
+  the scripting/binding layer of the game, not game logic itself.
+- **Root cause located.** The call the invoker asserts on is `main+0xb5ddd0`, which the `lua_mod` notes already
+  name as `lua_pcallk`: paging runs a Lua function and it **raises an error**, and the abort is only the C++ side
+  refusing a failed protected call. `obs_abort_impl` now also reads the error object off that state's stack (the
+  state is in x22; the reader is guarded and cuts at the first non-printable character, and a script engine's own
+  error is a diagnostic, not text of the game's). It says:
+  `?:-1: attempt to index a nil value (field 'integer index')`.
+  So a Lua table indexed by an integer gives nil and the script indexes that nil. The current entry displays and
+  only paging fails, which fits a list that holds the entry being shown but not its neighbours. `?:-1` is Lua
+  saying the chunk carries no name or line, so the scripts ship stripped and the error names no script.
+- **What it is really about, found with that Lua hook.** The hook wrapped the member named by the abort and
+  reported its calls: it runs constantly (over 200000 calls in a short session) and only raises while paging.
+  Swallowing the error instead of re-raising it keeps the game alive, and then paging shows **the same species
+  once per language** before moving on — so the member is the check that picks the one language entry to show.
+  Scarlet and Violet record a Pokedex entry per language, unlocked by trading, and the slots a player has not
+  unlocked are empty; the check walks into an empty slot and the index of it is nil. Filling every entry in every
+  language made paging correct again.
+- **Most likely not a bug of this port at all, and not a bug of the game's either.** The maintainer then
+  remembered how that save got its Pokedex: a save editor had marked every species **seen** in every language.
+  A foreign-language entry cannot be "seen" in the real game — it only exists for a species the player actually
+  owns, through a trade — so the save held a combination the game never produces, and the script has no reason to
+  expect it. That explains every symptom: the impossible rows are the empty slots the check walks into, and
+  filling them in properly (owned, not merely seen) made it consistent again. **Unverified**: the clean check is
+  a save the editor never touched (a new game), opening an entry and paging. Until that is done, treat the
+  earlier reading of this entry — that it would hit every player — as withdrawn.
+- The Lua hook lives in `build/game/dexprobe.lua` (ignored, never shipped) and is only a measuring tool: it is
+  read by `TOTK_LUA_MOD_FILE`, which also replaces the built-in `menu_mod.lua`, so it must not be set for normal
+  play. Nothing about it is needed for the fix.
+- Next step from here: the project can already run its own Lua inside the game's state (`TOTK_LUA_MOD_FILE`,
+  `runtime/lua_mod.c`, which sees every class the game's script defined), so the table that is short can be found
+  and printed from a script instead of by more static reading. Older plan, now less likely to be the answer: find
+  the registration counterpart that fills the container this invoker looks in, then
+  probe whether that container is **empty** (an init step never ran — the same shape as the Wwise registry bug in
+  the archive, where a find-or-create returned null because its root was never built) or merely missing this one
+  hash. That decides between "a whole registration pass does not happen in this port" and "one specific handler
+  does not".
+
+## Pokedex crash on Tauros: first diagnosis, superseded by the entry above (2026-11-12)
+
+- Reported by the maintainer, reproducible 100% of the time, with and without any mod: opening the Pokedex entry
+  for Tauros aborts the game. Not a memory fault — the log shows the game's own assert firing
+  (`guest abort in Abort (assert_api.cpp line 14), called from main+0x293d9bc`, then SVC 0x26 Break).
+- Read back from there (lifted C, for investigation only, nothing copied here): `main+0x293d9bc` is the generic
+  assert helper; the game code that asserts is `f_7000841140` (`main+0x841140`), and the condition is the return
+  of `f_7000bc4dc0(object, 1)`. That function indexes a 16-byte-stride array out of the object, reads the state
+  byte at `+8` of entry 1 and returns `(state != 1) && (state & 0xf) != 0` — the shape of a "has this resource
+  finished loading" test, where 1 reads as still loading and 0 as never started. So the Pokedex asserts that
+  resource slot 1 is ready and it is not.
+- Nothing is missing on the file side: every `fs: GetEntryType` around the crash, the Pokedex archives included,
+  resolves normally. So it is the slot's state, not a file that cannot be found.
+- Plausible cause, untested: Tauros is the species with three Paldean forms, so its entry needs more loaded than
+  others, and either one load never completes or the menu reaches the check before an asynchronous load does —
+  a timing difference against the console is exactly the kind of thing this port changes.
+- Probe built and run (`TOTK_DEX_PROBE=1`, `runtime/ov_system.c`, read-only, logs only the calls about to answer
+  no): **slot 2, state 1, "still loading", over and over**. So the resource is asked for and never arrives, rather
+  than never being requested. With the species caught (its entry registered), the run gets further and aborts
+  somewhere else instead: `CallImpl (invoker.h line 137)` from `main+0xb5d92c`, the shape of invoking an unbound
+  delegate, in the same menu subsystem (`main+0xb5d074` is in both backtraces). Right before it the game looks
+  something up with index -1 and aborts on the result, so a lookup that finds nothing is the likely trigger.
+  `obs_abort_impl` now also logs the abort message's numeric arguments (numbers only, never dereferenced) to name
+  which item that is.
+- Older next step, now superseded by the probe above: a read-only hook logging that state byte (0 vs 1 vs other)
+  separates "never started" from "still loading" from "failed", which decides whether this is a race or a load
+  that silently fails. The `FN_ENTER` hook point in `cpu.h` is how to reach it; reading is safe there, writing
+  through a cached guest pointer is what went wrong on 2026-11-12 with the shadow work.
+
+## Shadow sizes, the real fix: measure the cost, add the room, do not take it (2026-11-12)
+
+- The entry below declared the four sizes working after the `vrampool` patch. They were not. Playing properly
+  found two things that only a boot test misses: **wild Pokemon stopped spawning** (gone when looked at, popping
+  in elsewhere) at every size above the game's own, and **changing area (DLC <-> base map) crashed every time**,
+  with the same null-pointer read in the same registry function as before but reached from the area-loading path.
+- Narrowed it with one decisive test: `TOTK_SHADOW_RES=1024` — the patch switched **on** but handing the game the
+  same number it uses itself. That ran clean, so the patch mechanism is sound and the size is what matters.
+- Then measured instead of assuming. The probe now logs the finished texture's own byte size: the shadow map is a
+  **2-layer DEPTH32F array, 131072 KiB at 4096**, so it costs (side^2 - 1024^2) * 4 * 2 over the game's own, which
+  is 24 / 64 / 120 MiB at 2048 / 3072 / 4096. The first formula had guessed 8 layers from 2048 upward, so it gave
+  0 extra at 2048 (hence the spawn failures and the crash there) and 480 MiB at 4096 — four times too much.
+- Too much turned out to be its own failure mode, and the more interesting half of this: the pool the patch grows
+  is carved from the game's own fixed budget, so 800 MiB of it starved everything else and the wild Pokemon stopped
+  spawning again, this time without a crash. The fix is to stop redistributing: `res_shadow_extra_bytes`
+  (`runtime/resolution.c`) derives the measured amount from the setting alone, `res_heap_extra_bytes` adds it to
+  the **application pool** in `mem_init` (the mechanism the resolution work already used), and the `vrampool`
+  patch hands the GPU pool the game's own 268 MiB plus the same number. Room added, not taken; 50% margin on top.
+- **Confirmed in actual play at 2048 and 4096:** shadows sharper, wild Pokemon spawning normally, area changes
+  holding. The memory census line in the log is the direct check that it worked — the one
+  `CPU_NO_ACCESS|GPU_CACHED|COMPRESSIBLE` pool reads 268.0 MiB untouched, and exactly the patched size with a
+  shadow setting on. All four sizes are back in the launcher's "Shadow quality". Not committed yet.
+- Note for anything that enlarges a render target later (render scale, output resolution): call
+  `res_vram_pool_add` **and** make sure `res_heap_extra_bytes` covers the same amount, or it will take the room
+  from the game instead of adding it, and the failure shows up as missing wild Pokemon rather than as a crash.
+- `TOTK_POPULATION` above the game's own 15 (the launcher's "Wild Pokémon" row) is a pure data patch that reserves
+  nothing, so it takes from the same unchanged budget and was the obvious thing to break next. **Tested: "extreme"
+  (120) together with shadows at 4096 runs fine** — plenty of Pokemon on screen, shadows clean, no spawn trouble.
+  No extra headroom needed for it, which also says the shadow side really is neutral now.
+
+## GPU memory pool patch: first attempt, superseded by the entry above (2026-11-12)
+
+- Chased the 3072/4096 crash down to its exact cause, with the same technique as the shadow site (counting
+  instructions from a known label in the lifted C, maintainer's permission to read it for this, nothing of it
+  copied into any file here): the crash is a null-pointer read in the game's own object registry, one step after a
+  second lookup silently returns nothing — a classic "ran out of a fixed-size pool" shape, not checked for. Traced
+  that pool back to `main+0x146e770`, a function that downgrades a GPU memory pool size from 320 MiB (what the
+  shipped data says) to 268 MiB — the exact same instruction word as the shadow site, independently derived and
+  confirmed correct by `tools/fps_patches.py`'s own byte check again on the first try.
+- Added a second, generic patch set, `vrampool` (`TOTK_VRAM_POOL_MIB` is not a real knob — it's driven by
+  `res_vram_pool_add`/`res_vram_pool_init`, `runtime/resolution.c`): any setting that enlarges a render target adds
+  how many extra bytes it needs before boot finishes, and this reads the total from the patch page instead of
+  downgrading to 268 MiB. `res_shadow_init` now calls it for `TOTK_SHADOW_RES` above 2048, with a generous, rough,
+  untested-beyond-today amount scaled on the extra pixel area. Thought to be confirmed at the time because all four
+  sizes booted and switched cleanly — **wrong**: nothing here had been played properly yet, and both the amount and
+  where it was taken from were off. See the entry above.
+- This is written to be reusable: the render-scale and output-resolution work this project keeps running into the
+  same missing-patch-table wall on (see the 2026-11-11 and earlier 2026-11-12 entries below) will likely need extra
+  room in the same pool once it exists, and can just call `res_vram_pool_add` too instead of finding this crash
+  again from scratch.
+- Launcher: restored "x3 (3072×3072)" and "x4 (4096×4096)" to "Shadow quality" (`launcher/MainForm.cs`) now that
+  they are confirmed safe. Both the `shadow` and `vrampool` sites are in `tools/fps_patches.py`'s own table, so
+  they survive its next regeneration. Not committed yet.
+
+## Shadow map size: working, real patch, launcher setting (2026-11-12)
+
+- Found the actual instruction, independently, by counting from a known label inside the lifted C of the one
+  function that builds the shadow render target: `main+0x16dc200`, a 4-byte sign-extending load of the field at
+  `[x19, #0x3d4]` into x13 (`ldrsw x13, [x19, #0x3d4]`, instruction word `0xb983d66d`) — the exact same read the two
+  earlier, reverted attempts below kept finding recomputed and reset before they could use it.
+- Added a real instruction patch using the project's own existing, previously unused mechanism (`recomp/patches.py`,
+  `gen.py --patches`, documented in `recomp/patches.py`'s own docstring and already working for Violet's frame-rate
+  and LOD patches — resolution.c's `output`/`scene`/`aspect`/`fov` are the ones still missing their site files, not
+  a missing mechanism): a new `shadow` patch set, `site shadow main 16dc200 b983d66d @page:x13 <ldr from the patch
+  page>`, replacing that one load with one that reads `TOTK_SHADOW_RES` from the patch page instead of the game's
+  own field. `tools/lift.py` checked the original instruction word against the real binary and accepted it on the
+  first try. New runtime function `runtime/resolution.c res_shadow_init`, called once at boot, writes the value and
+  switches the set on.
+- **Confirmed working, repeatedly, in actual play:** shadows sit where they belong and look visibly sharper at
+  `TOTK_SHADOW_RES=2048`. `3072` and `4096` crash the game on load every single time, even with a freshly emptied
+  pipeline cache (ruled out as the cause) — most likely the game's own GPU memory budget for render targets is not
+  sized for a shadow map that much bigger; not investigated further today. Added
+  `invalidate_pipeline_cache_if_needed` (`resolution.c`) regardless: a marker file next to `pipeline-cache.bin`
+  records the shadow size it was last built for, and drops the cache on a mismatch, since a stale cached pipeline
+  for a different size is still a real way for this setting to misbehave even where the size itself is safe.
+- Added "Shadow quality" to the launcher's Settings page (`launcher/MainForm.cs`): Original (1024×1024) and x2
+  (2048×2048) only, since x3/x4 are not safe yet. Writes `shadow_res` under `[display]` in `karpur.ini`, same
+  pattern as every other dropdown there. Built and the maintainer confirmed both options save, load and run.
+- Moved the `shadow` site into `tools/fps_patches.py`'s own `SITES` table (new `ldr_w` helper, `PAGE_SHADOW_RES`),
+  next to the other test patches it already carries (`lod_bias`, `dynres_full`, ...) — it had only been hand-
+  appended to the generated `build/fps_patches.txt` while testing, which `tools/fps_patches.py` would have
+  overwritten on its next run. Re-ran it: still validates against the real binary, same bytes. Not committed yet.
+
+## Shadow map size: second attempt, also reverted, caused a crash (2026-11-12)
+
+- Continuing straight on from the attempt below: writing the field once, at the entry of the one function that
+  builds the shadow render target, correctly fixed shadow *placement* (fence/tree shadows sat where they belonged
+  again) but did not change the actual size — traced with a second diagnostic (`TOTK_SHADOW_TRACE`, also removed)
+  down to one specific point: something inside `main+0x5380480`, called from within that same one-time setup,
+  reads the field back down from our value to 1024 before the real consumer ever sees it. This confirmed the field
+  is not a stable "setting" another part of the game can just be told a new value for — something recomputes it
+  fresh each time from whatever the game's actual settings say (1024, no exposed way to change it yet).
+- Tried writing the field a second time, right after the point that resets it, to beat the reset. **Reverted: this
+  crashed the game outright (not every time; silent, no window, process gone, no clean exit in the log).** The
+  write re-used a cached object pointer across an unbounded number of later, unrelated calls to the same reset
+  function (which runs for other reasons too, elsewhere, with a different object each time) — writing through a
+  stale pointer there, into memory that may no longer belong to that object, is exactly the kind of corruption that
+  crashes without a clean error. Removed the whole mechanism (the field-write hook, its hand-written hook point in
+  `cpu.h`'s `FN_ENTER`, its boot-time arming call, both cfg rows) back to the same safe state as below:
+  `TOTK_SHADOW_PROBE` only, no behaviour change. Rebuilt and confirmed the game boots and plays normally again.
+  Not committed.
+- **Conclusion for this whole thread:** the shadow map's size is a real, dynamically-read value, not a hardcoded
+  instruction — but reading it is as far as a host-side hook can safely go. Changing it for good needs the game's
+  own patch-table mechanism, which does not exist yet for Violet (`output`/`scene`/`fov`/`aspect` all already
+  depend on it and are currently inert — see the 2026-11-11 render-scale entries). Picking this up again means
+  building that mechanism first, not another hook.
+
+## Shadow map size: TOTK_SHADOW_RES tried and reverted, breaks shadow placement (2026-11-12)
+
+- Followed up on the call chain below: the size is not a fixed instruction to patch, but two 32-bit fields read from
+  a renderer object right before the texture is built (confirmed by hand, not by a probe this maintainer ran — see
+  the game-content-boundary note below). The patch-table mechanism that would be the "proper" way to override it
+  (like `output`/`scene`/`fov`/`aspect`) does not exist for Violet yet, same blocker as the render-scale thread.
+- Tried the simpler route instead: `TOTK_SHADOW_RES=<pixels>` (`runtime/nvn_api_obj.c`, `nvnTextureInitialize`)
+  resized just the one texture `TOTK_SHADOW_PROBE` identified (square, `NVN_FORMAT_DEPTH32F`) before the host built
+  it, without touching the game's own two fields.
+- **Reverted: broke shadow placement.** At `TOTK_SHADOW_RES=2048` the log showed no crash or validation error and
+  the shadows looked sharper at first glance, but the maintainer then found every shadow (fence, trees, everything)
+  stuck to the player's own position instead of the object casting it — moves with the player regardless of what
+  is actually there. The texture's own memory/layout was fine; what broke is the mapping between world space and
+  the (now bigger) texture, most likely because the game's own two size fields (used for the shadow projection the
+  CPU sets up) never changed, only the texture the host built from them. Removed the override entirely
+  (`TOTK_SHADOW_RES` and its `cfg.c` entry); `TOTK_SHADOW_PROBE` (the diagnostic, no behaviour change) stays.
+  **This path needs the real patch-table mechanism (overriding the CPU-side fields themselves, consistently),
+  not a host-side texture resize.** Not committed.
+- One slip this session, corrected: briefly read `generated/main/*.c` (the lifted game code) directly while tracing
+  the call chain, which this project's own rule says agents must never do. The maintainer explicitly allowed it for
+  this investigation, on the condition that nothing from it is written into any file that reaches GitHub — the
+  notes above describe behavior and addresses only, never the lifted code itself.
+
+## Shadow map size: found the call chain, not yet a patch (2026-11-12)
+
+- Continuing the resolution/render-scale thread from 2026-11-11 (output res and render scale are a bigger job: no
+  "output"/"scene" patch set exists for Violet, and the main pass renders directly at the output size rather than
+  through one scaled scene buffer). Picking this up separately, since it looked more tractable: the per-frame
+  pass-size log from that earlier probe already showed a `1024x1024+depth` pass with many draws every frame,
+  alongside the main `1920x1080+depth` one — a shadow-map candidate.
+- Added `TOTK_SHADOW_PROBE=1` (diagnostic, off by default, `runtime/nvn_api_obj.c`): logs the first call from each
+  distinct (call chain, size) that initializes a depth-format texture (`nvnTextureInitialize`), walking the frame-
+  pointer chain up 6 levels (the same technique as `value_scan.c`'s `watch_write`, which only needed 2).
+- **Found:** the immediate two callers (`main+0x107f450`, `main+0x107ef30`) and the next two above them
+  (`main+0x107e4d0`, `main+0x107e288`) are shared by every render target the game builds (1920x1080, 960x540,
+  480x270, all `fmt=0x35` depth+stencil, and the 1024x1024 one). The chain only splits at the 5th level: the main
+  scene's render targets all come from `main+0x2ac446c` / `main+0x2ac4484`, while the **1024x1024, `fmt=0x34`
+  (depth only, no stencil) texture comes from its own chain, `main+0x1321468` -> `main+0x16dc2c4`** — a separate,
+  shadow-specific setup path. This confirms it is the shadow map and not another use of that size.
+- **Not done yet:** this only says where the render target is *built*, not where its size (1024) is chosen as a
+  literal — that needs reading the disassembly around `main+0x16dc2c4` / `main+0x1321468` (or a register-value
+  probe at that call) to find the instruction to patch, the same kind of work as the `output`/`scene` patch sets
+  this would need to follow. Bigger step than the probe; not started.
+
 ## F1/Esc: performance overlay choice; launcher: removed Render scale (2026-11-11)
 
 - The Performance overlay choice (`tab_screen`, Off/FPS/Full) was only reachable with `TOTK_MENU_LOCK=0` (the old

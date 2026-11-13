@@ -343,6 +343,29 @@ partial class MainForm
     readonly FlowLayoutPanel teamRow = new() { Dock = DockStyle.Top, AutoSize = true, BackColor = Theme.Back, WrapContents = true };
     readonly Label teamTitle = Theme.Label("YOUR TEAM", 8.5f, muted: true, style: FontStyle.Bold);
 
+    // AMD graphics cards crash or run very poorly right now, and it keeps coming back as separate issues from
+    // different people hitting the same thing. Shown to everyone on Home, not just detected AMD users, since the
+    // point is also to reach someone who could help fix it, not only to warn the one person about to hit it.
+    Control AmdNotice()
+    {
+        var title = Theme.Label("Known issue: AMD graphics cards", 10.5f, style: FontStyle.Bold);
+        title.ForeColor = Theme.Error;
+        var body = Theme.Label(
+            "KarPur currently crashes or runs very poorly on AMD GPUs. If you know Vulkan and AMD drivers and could " +
+            "help track this down, please get in touch — it would help a lot of people at once.", 9.5f, muted: true);
+        body.MaximumSize = new Size(700, 0);
+        body.Margin = new Padding(0, 6, 0, 10);
+        var link = new LinkLabel { Text = "Open the GitHub issues", AutoSize = true, LinkColor = Theme.Error, BackColor = Color.Transparent };
+        link.Click += (_, _) => Process.Start(new ProcessStartInfo("https://github.com/Grunttanamo/KarPur/issues") { UseShellExecute = true });
+        var stack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, BackColor = Color.Transparent, WrapContents = false };
+        stack.Controls.Add(title);
+        stack.Controls.Add(body);
+        stack.Controls.Add(link);
+        var card = new Card { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(16, 14, 16, 14) };
+        card.Controls.Add(stack);
+        return card;
+    }
+
     Control HomePage()
     {
         var page = new Surface { BackColor = Theme.Back };
@@ -384,6 +407,8 @@ partial class MainForm
         teamTitle.Padding = new Padding(2, 0, 0, 12);
         body.Controls.Add(teamRow);
         body.Controls.Add(teamTitle);
+        body.Controls.Add(Spacer(16, Theme.Back));
+        body.Controls.Add(AmdNotice());
         page.Controls.Add(body);
         page.Controls.Add(hero);
         heroPlay.Click += (_, _) => Play();

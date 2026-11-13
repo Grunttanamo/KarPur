@@ -286,6 +286,9 @@ int res_heapdef_build(const void *in, size_t n, void **out, size_t *out_n);   //
                                                            // the grown heaps, malloc'd; 0 = cannot (logged)
 void res_heapdef_served(void);                             // romfs.c serves the grown table
 void res_init(void);                                       // after rt_patches_init: the patch page and the sets
+void res_shadow_init(void);                                // after rt_patches_init: TOTK_SHADOW_RES, the "shadow" set
+void res_vram_pool_add(uint32_t extra_bytes);              // before res_vram_pool_init: ask for more of the GPU memory pool
+void res_vram_pool_init(void);                             // after every res_vram_pool_add call: the "vrampool" set
 void vk_exec_scene_size(unsigned out[2]);                  // KarPur vk_exec.c: the measured scene size, 0x0 at first
 void res_sizes(unsigned out[2], unsigned scene[2]);      // the output and scene sizes in effect (the game's own
                                                            // until res_init switched the sets on)

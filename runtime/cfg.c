@@ -30,7 +30,7 @@ static int save_ok = 1;                         // the last cfg_save_to wrote (o
 // Every name the runtime reads (and the patch sets in generated/), without the prefix. A file key outside this list is
 // logged as unknown. A new variable goes here too, or its ini key logs a harmless "unknown key" line.
 static const char *const known[] = {
-    "AB", "ACQUIRE_AHEAD", "CAM_PROBE", "RES_PROBE", "DLAA", "DLAA_AT", "DLAA_DEPTH_INV", "DLAA_JITTER_BIAS", "DLAA_JX", "DLAA_JY", "DLAA_PRESET", "CAMERA_INVERT_X", "CAMERA_INVERT_Y", "SHADER_CENSUS", "STICK_SWAP", "DLSS_CONVERT", "DLSS_DEBUG", "FRAMEGEN", "FRAMEGEN_FEATURES", "FRAMEGEN_MODE", "FRAMEGEN_OBS", "FRAMEGEN_VERBOSE", "DLSS_HUD_DIFF", "DLSS_OUT", "APP_POOL", "ASPECT", "ASPECT_PATCH", "ASSUME_FOCUS", "ASTC", "ASTC_BC", "ASTC_TIME", "ASYNC_PREEMPT", "AUDIO", "AUDIO_OFF", "AUDIO_PREFILL_MS",
+    "AB", "ACQUIRE_AHEAD", "CAM_PROBE", "SHADOW_PROBE", "SHADOW_RES", "RES_PROBE", "DLAA", "DLAA_AT", "DLAA_DEPTH_INV", "DLAA_JITTER_BIAS", "DLAA_JX", "DLAA_JY", "DLAA_PRESET", "CAMERA_INVERT_X", "CAMERA_INVERT_Y", "SHADER_CENSUS", "STICK_SWAP", "DLSS_CONVERT", "DLSS_DEBUG", "FRAMEGEN", "FRAMEGEN_FEATURES", "FRAMEGEN_MODE", "FRAMEGEN_OBS", "FRAMEGEN_VERBOSE", "DLSS_HUD_DIFF", "DLSS_OUT", "APP_POOL", "ASPECT", "ASPECT_PATCH", "ASSUME_FOCUS", "ASTC", "ASTC_BC", "ASTC_TIME", "ASYNC_PREEMPT", "AUDIO", "AUDIO_OFF", "AUDIO_PREFILL_MS",
     "BACKGROUND_WINDOW", "BIND_A", "BIND_B", "BIND_DOWN", "BIND_L", "BIND_LCLICK", "BIND_LEFT", "BIND_LSTICK_DOWN", "BIND_LSTICK_LEFT",
     "BIND_LSTICK_RIGHT", "BIND_LSTICK_UP", "BIND_MINUS",
     "BIND_PLUS", "BIND_R", "BIND_RCLICK", "BIND_RIGHT", "BIND_RSTICK_DOWN", "BIND_RSTICK_LEFT", "BIND_RSTICK_RIGHT", "BIND_RSTICK_UP",
@@ -59,7 +59,7 @@ static const struct { const char *key, *section; } sections[] = {
     {"REALTIME", "frame rate"}, {"CLOTH_REALTIME", "frame rate"}, {"HIGHFPS_FIX", "frame rate"},
     {"FULLSCREEN", "display"}, {"WINDOW_SIZE", "display"}, {"PERF_OVERLAY", "display"}, {"VK_PRESENT", "display"},
     {"GPU_INDEX", "display"}, {"GPU_NAME", "display"}, {"OUTPUT_RES", "display"}, {"RENDER_SCALE", "display"}, {"UPSCALER", "display"}, {"DLAA", "display"}, {"DLSS_OUT", "display"}, {"DLAA_PRESET", "display"}, {"FRAMEGEN", "display"},
-    {"SHARPNESS", "display"}, {"ASPECT", "display"}, {"LOD", "display"}, {"LOD_BIAS", "display"}, {"ANISO", "display"}, {"FOV", "display"}, {"COLOR_PRESET", "display"},
+    {"SHARPNESS", "display"}, {"ASPECT", "display"}, {"LOD", "display"}, {"LOD_BIAS", "display"}, {"ANISO", "display"}, {"FOV", "display"}, {"COLOR_PRESET", "display"}, {"SHADOW_RES", "display"},
     {"COLOR_BRIGHTNESS", "display"}, {"COLOR_CONTRAST", "display"}, {"COLOR_SATURATION", "display"},
     {"COLOR_GAMMA", "display"},
     {"DEVICE_PROFILE", "display"}, {"ASSUME_FOCUS", "display"}, {"POPULATION", "display"},
@@ -99,6 +99,7 @@ static const CfgMeta metas[] = {
     {"UPSCALER", "fsr", "fsr|bilinear", LIVE}, {"SHARPNESS", "80", "0..100", LIVE},
     {"DLAA", "0", "0|1", RESTART}, {"DLSS_OUT", "game", NULL, LIVE}, {"DLAA_PRESET", "5", "0|5|10|11", RESTART}, {"FRAMEGEN", "0", "0|1|2|3|4", RESTART},   // game | window | <w>x<h> (vk_taa.c)   // NVIDIA DLAA (vk_dlaa.c, vk_taa.c): NGX needs its extensions when Vulkan starts
     {"ASPECT", "fit", "fit|stretch", LIVE}, {"FOV", "100", "70..140", LIVE},
+    {"SHADOW_RES", "0", "0|2048|3072|4096", RESTART},   // resolution.c res_shadow_init; 0: the game's own (1024)
     // Violet detail (lod.c, vk_texture.c), read at start
     {"LOD", "0", "0|1", RESTART}, {"LOD_BIAS", "-4", "-8..0", RESTART}, {"ANISO", "0", "0|2|4|8|16", RESTART},
     // colour adjustment (vk_color.c); the preset is the menu's, the four values are what the present uses

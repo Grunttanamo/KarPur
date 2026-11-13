@@ -36,6 +36,7 @@
 
 #include "cfg.h"
 #include "host.h"
+#include "platform/platform.h"
 
 #define BASE_W 1920
 #define BASE_H 1080
@@ -98,7 +99,22 @@ uint64_t res_heap_extra_kib(void) {
     return (uint64_t)ceil(DTA_KIB * (1.0 + grow) / 1024.0) * 1024 - DTA_KIB;
 }
 
-uint64_t res_heap_extra_bytes(void) { return ((res_heap_extra_kib() << 10) + 0x1fffff) & ~0x1fffffull; }
+// What the shadow map (TOTK_SHADOW_RES) costs over the game's own 1024: measured, not assumed — the probe in
+// nvn_api_obj.c reports the finished texture as a 2-layer DEPTH32F array, 131072 KiB at 4096, so (side^2 -
+// 1024^2) * 4 bytes * 2 layers, and half as much again as margin. Derived from the setting alone so that mem_init
+// can add it to the application pool before the game runs (memory.c) and res_shadow_init can hand the same number
+// to the GPU memory pool: the room is then added to the process instead of taken from the game's other heaps.
+// Taking it from them is what broke wild Pokemon spawning and crashed an area change (2026-11-12).
+static uint32_t res_shadow_extra_bytes(void) {
+    int want = cfg_int("TOTK_SHADOW_RES");
+    if (want != 2048 && want != 3072 && want != 4096) return 0;
+    uint32_t need = ((uint32_t)want * (uint32_t)want - 1024u * 1024u) * 4u * 2u;
+    return need + need / 2u;
+}
+
+uint64_t res_heap_extra_bytes(void) {
+    return (((res_heap_extra_kib() << 10) + res_shadow_extra_bytes()) + 0x1fffff) & ~0x1fffffull;
+}
 
 // ---- the HeapDef table. BYML version 2..7, little endian ("YB"): a hash node is {u8 0xC1, u24 count} and count
 // entries {u24 key index, u8 type, u32 value}; an int (type 0xD1) is stored in the entry, so a size changes in place.
@@ -240,6 +256,91 @@ void res_init(void) {
     }
     rt_log("resolution: output %ux%u, scene %ux%u%s; texture heap +%llu KiB", R.ow, R.oh, R.sw, R.sh,
            scene_on ? "" : " (the game's own 5/6 of the output)", (unsigned long long)res_heap_extra_kib());
+}
+
+// A cached Vulkan pipeline built for one shadow map size, reused for another: Vulkan's own cache header check
+// (vendor/device/driverUUID) does not know about TOTK_SHADOW_RES, so it does not reject that by itself, and a
+// stale pipeline crashed the game (a guest null-pointer-ish fault) after switching the size a few times. A marker
+// file next to the cache records the size it was built for; a mismatch drops the cache before Vulkan ever opens it.
+static void invalidate_pipeline_cache_if_needed(int effective) {
+    char exe[PLAT_PATH_MAX * 2];
+    int n = plat_exe_path(exe, sizeof exe);
+    if (!n || n >= (int)sizeof exe) return;
+    char *cut = plat_last_sep(exe);
+    if (!cut) return;
+    *cut = 0;
+    char cache[1024], marker[1024];
+    snprintf(cache, sizeof cache, "%s/pipeline-cache.bin", exe);
+    snprintf(marker, sizeof marker, "%s/pipeline-cache.bin.shadow_res", exe);
+    int prev = -1;
+    FILE *f = fopen(marker, "r");
+    if (f) {
+        if (fscanf(f, "%d", &prev) != 1) prev = -1;
+        fclose(f);
+    }
+    if (prev != effective) {
+        if (remove(cache) == 0)
+            rt_log("resolution: shadow map size changed (%d -> %d); dropped the stale pipeline cache", prev, effective);
+        f = fopen(marker, "w");
+        if (f) {
+            fprintf(f, "%d", effective);
+            fclose(f);
+        }
+    }
+}
+
+// GPU memory pool (found this session, independently, the same way as the shadow map site below and in the same
+// function family, byte-identical too): main+0x146e770 downgrades a pool size from 320 MiB (what the shipped data
+// says) to 268 MiB; a render target enlarged by another setting can run out of this pool and crash when the game
+// is about to load an area (confirmed: the shadow map above a certain size does). The "vrampool" patch set reads
+// the size from the patch page instead; any setting that enlarges a render target calls res_vram_pool_add before
+// res_vram_pool_init runs (boot.c), so more than one of them can ask for extra room at once.
+static uint32_t vram_pool_extra;
+void res_vram_pool_add(uint32_t extra_bytes) { vram_pool_extra += extra_bytes; }
+void res_vram_pool_init(void) {
+    int set = rt_patch_set("vrampool");
+    if (set < 0) {
+        if (vram_pool_extra)
+            rt_log("resolution: this game version has no GPU-memory-pool patch; the extra memory another setting "
+                   "asked for does nothing");
+        return;
+    }
+    // The game's own 268 MiB plus exactly what asked for it: mem_init grew the application pool by the same amount
+    // (res_heap_extra_bytes), so this is room added, not room taken from the game's other heaps.
+    uint32_t v = 0x10c00000u + vram_pool_extra;
+    memcpy(rt_patch_page() + 80, &v, sizeof v);
+    rt_patch_switch(set, vram_pool_extra != 0);
+    if (vram_pool_extra) rt_log("resolution: GPU memory pool %u MiB (the game's own is 268 MiB)", v / (1024u * 1024u));
+}
+
+// Shadow map size (TOTK_SHADOW_RES=<pixels>, 0: off, the game's own 1024x1024): the sun shadow map's render target
+// is square, built once at load, from a 32-bit field on a renderer object that only one instruction ever reads
+// (found this session by tracing the call chain into nvnTextureInitialize, not from another project's code: it is
+// read fresh from somewhere else each time, so writing it at runtime does not stick). The "shadow" patch set
+// replaces that one read with one from the patch page instead, so the field is never consulted for this at all.
+void res_shadow_init(void) {
+    int shadow = rt_patch_set("shadow");
+    if (shadow < 0) {
+        rt_log("resolution: this game version has no shadow-map-size patch; TOTK_SHADOW_RES does nothing");
+        return;
+    }
+    int want = cfg_int("TOTK_SHADOW_RES");
+    if (want != 1024 && want != 2048 && want != 3072 && want != 4096) {
+        rt_patch_switch(shadow, 0);
+        invalidate_pipeline_cache_if_needed(1024);
+        return;
+    }
+    // The shadow map is a depth array in the one CPU_NO_ACCESS|GPU_CACHED|COMPRESSIBLE pool the memory census shows
+    // at exactly the size res_vram_pool_init patches. Too little of it and the game's own allocation fails
+    // unchecked (an area change crashed); too much and the same pool's growth starves the rest of the game out of
+    // the fixed budget it shares (wild Pokemon stopped spawning). The measured amount, with mem_init adding it to
+    // the application pool as well, keeps both sides whole.
+    res_vram_pool_add(res_shadow_extra_bytes());
+    uint32_t v = (uint32_t)want;
+    memcpy(rt_patch_page() + 76, &v, sizeof v);
+    rt_patch_switch(shadow, 1);
+    invalidate_pipeline_cache_if_needed(want);
+    rt_log("resolution: shadow map %ux%u (the game's own is 1024x1024)", v, v);
 }
 
 // 16:9 within 1% (1366x768 counts): the shape the game's own layouts and camera are made for.

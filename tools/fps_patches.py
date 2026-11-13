@@ -85,8 +85,14 @@ def ldr_x(rt, rn, off):
     return 0xF9400000 | (off // 8) << 10 | rn << 5 | rt
 
 
+def ldr_w(rt, rn, off):
+    return 0xB9400000 | (off // 4) << 10 | rn << 5 | rt
+
+
 PAGE_FRAME_NS = 64   # patch page byte offset of the frame time in ns (runtime/frame_dt.c; recomp/patches.py layout)
 PAGE_LOD_BIAS = 72   # patch page byte offset of the LOD bias float (runtime/lod.c)
+PAGE_SHADOW_RES = 76   # patch page byte offset of the shadow map side in pixels (runtime/resolution.c)
+PAGE_VRAM_POOL = 80    # patch page byte offset of the GPU memory pool size in bytes (runtime/resolution.c)
 
 
 def movz_w(rd, imm16, shift):
@@ -145,11 +151,23 @@ SITES = [
     # bound to 1920x1080
     ('dynres_full', 'TOTK_DYNRES_FULL', 0, 0xbd7014, movz_x(8, 0x500, 0), [movz_x(8, 0x780, 0)]),
     ('dynres_full', 'TOTK_DYNRES_FULL', 0, 0xbd7020, movz_x(8, 0x2D0, 0), [movz_x(8, 0x438, 0)]),
+    # shadow (TOTK_SHADOW_RES, 1024/2048/3072/4096; found this session, independently, by counting instructions from
+    # a known label in the lifted C): main+0x16dc200 `ldrsw x13, [x19, #0x3d4]` sign-extends a field of the renderer
+    # object into x13, the side in pixels of the sun shadow map's render target (the game's own is 1024); the field
+    # is recomputed from elsewhere every time, so changing it at runtime does not stick. Read the patch page instead.
+    ('shadow', 'TOTK_SHADOW_RES', 0, 0x16dc200, 0xb983d66d, ['@page:x13', ldr_w(13, 13, PAGE_SHADOW_RES)]),
+    # vrampool (internal switch only, armed by resolution.c res_vram_pool_init, not a TOTK_ env var a player sets;
+    # found this session, independently, the same way as the shadow site above, in the same function family, and
+    # byte-identical too): main+0x146e770 downgrades a GPU memory pool size from 320 MiB (what the shipped data
+    # says) to 268 MiB; a render target enlarged by another setting (the shadow map above, or a future one) can run
+    # out of this pool and crash when the game is about to load an area. Read the size from the patch page instead,
+    # so any such setting can ask for more of it, not just this one.
+    ('vrampool', 'TOTK_VRAM_POOL_INTERNAL', 0, 0x146e770, 0x52a21809, ['@page:x9', ldr_w(9, 9, PAGE_VRAM_POOL)]),
     # interval_one (test): main+0x2b7a874 `add w1, w20, #1` (w20 read from [x10, #0x20]) is the argument of a virtual
     # call in the frame-mode function main+0x2b79f60; the third-party 3.0.1 60 fps patch sets w1 = 1 at this offset
     ('interval_one', 'TOTK_INTERVAL_ONE', 0, 0x2b7a874, 0x11000000 | 1 << 10 | 20 << 5 | 1, [movz_w(1, 1, 0)]),
 ]
-OPTIONAL = {'lod_bias', 'data_watch', 'step_ten', 'indoor_fix', 'dynres_full', 'interval_one', 'lua_mod'}
+OPTIONAL = {'lod_bias', 'data_watch', 'step_ten', 'indoor_fix', 'dynres_full', 'interval_one', 'lua_mod', 'shadow', 'vrampool'}
 OODLE_DECOMPRESS = 0xcc8750   # main offset of OodleLZ_Decompress in 4.0.0 (calls.py --string oodle, 2026-11-02)
 PAGE_OODLE_HOST = 0xfd0       # patch page offset of the host wrapper (runtime/data_watch.c)
 # Lua (docs/progress.md 2026-11-03, calls.py --string / --refs on 4.0.0)

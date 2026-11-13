@@ -32,7 +32,7 @@ partial class MainForm : Form
                                            Text = "Compatibility mode (try it if the game crashes after the character creation)" };
     readonly ComboBox windowSize = Combo(), fpsLimit = Combo(), present = Combo(), upscaler = Combo(), overlay = Combo(),
                       population = Combo(), colour = Combo(), antiAliasing = Combo(), dlssModel = Combo(), frameGen = Combo(),
-                      gpu = Combo(), opMode = Combo();
+                      gpu = Combo(), opMode = Combo(), shadowRes = Combo();
     readonly Label gpuNote = Theme.Label("", 9.5f, muted: true);
     readonly Dictionary<Control, Label> rowLabels = new();
     readonly Button addStreamline = Theme.Button("Add Streamline files", glyph: Theme.GlyphFolder);
@@ -95,6 +95,8 @@ partial class MainForm : Form
         { ("switch", "Switch (15, default)"), ("switch2", "Switch 2 (40)"), ("enhanced", "Enhanced (80)"),
           ("extreme", "Extreme (120, can lower the frame rate)") };
     static readonly (string, string)[] Colours = { ("auto", "Automatic (from your game)"), ("violet", "Violet"), ("scarlet", "Scarlet") };
+    static readonly (string, string)[] ShadowReses =
+        { ("0", "Original (1024×1024)"), ("2048", "x2 (2048×2048)"), ("3072", "x3 (3072×3072)"), ("4096", "x4 (4096×4096)") };
 
     readonly string startTab;
 
@@ -370,6 +372,7 @@ partial class MainForm : Form
         Fill(overlay, Overlays);
         Fill(population, Populations);
         Fill(colour, Colours);
+        Fill(shadowRes, ShadowReses);
         var sharp = new FlowLayoutPanel { AutoSize = true, BackColor = Theme.Card, Margin = new Padding(0) };
         sharpnessValue.Margin = new Padding(6, 6, 0, 0);
         sharp.Controls.Add(sharpness);
@@ -405,6 +408,7 @@ partial class MainForm : Form
         fgNote.AutoSize = true;
         SettingRow(grid, "", fgNote);
         SettingRow(grid, "Performance overlay", overlay);
+        SettingRow(grid, "Shadow quality", shadowRes);
         SettingRow(grid, "Wild Pokémon", population);
         SettingRow(grid, "Compatibility", safeSubmit);
         var look = Grid(2);
@@ -868,9 +872,10 @@ partial class MainForm : Form
         UpdateRows();
         Select(overlay, built ? ini.Get("perf_overlay") : null, "off");
         Select(population, built ? ini.Get("population") : null, "switch");
+        Select(shadowRes, built ? ini.Get("shadow_res") : null, "0");
         safeSubmit.Checked = (built ? ini.Get("submit_defer") : null) == "0";
         sharpness.Value = int.TryParse(built ? ini.Get("sharpness") : null, out int s) ? Math.Clamp(s, 0, 100) : 80;
-        foreach (Control c in new Control[] { fullscreen, windowSize, fpsLimit, present, opMode, upscaler, antiAliasing, addDlss, dlssModel, frameGen, addStreamline, overlay, population, safeSubmit, sharpness, saveSettings })
+        foreach (Control c in new Control[] { fullscreen, windowSize, fpsLimit, present, opMode, upscaler, antiAliasing, addDlss, dlssModel, frameGen, addStreamline, overlay, population, shadowRes, safeSubmit, sharpness, saveSettings })
             c.Enabled = built;
         settingsNote.Text = built ? "" : "Build the game first: the settings belong to its folder.";
         DlssStatus();
@@ -1009,6 +1014,7 @@ partial class MainForm : Form
             ini.Set("display", "sharpness", sharpness.Value.ToString());
             ini.Set("display", "perf_overlay", Value(overlay));
             ini.Set("display", "population", Value(population));
+            ini.Set("display", "shadow_res", Value(shadowRes));
             ini.Set("compatibility", "submit_defer", safeSubmit.Checked ? "0" : "1");
             ini.Save();
             settingsNote.Text = "Saved. They apply the next time the game starts.";
