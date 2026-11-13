@@ -2756,7 +2756,7 @@ static int pipe_memo_on(void) {
 
 // KarPur diagnostic: draws skipped, by reason, summed over 600 presented frames and logged when any were (at most 30
 // times a run). Objects missing on screen without a warning (Violet: some vases, a flower bed) show up here.
-enum { SK_RENDER_OFF, SK_SCISSOR, SK_SHADER_WAIT, SK_SHADER_FAIL, SK_PIPE_WAIT, SK_PIPE_FAIL, SK_N };
+enum { SK_RENDER_OFF, SK_SCISSOR, SK_SHADER_WAIT, SK_SHADER_FAIL, SK_PIPE_WAIT, SK_PIPE_FAIL, SK_SHADOW_OFF, SK_N };
 static uint64_t skips[SK_N], skip_draws, skip_frame0;
 static int skip_logs;
 static int skip_note(int why) {
@@ -2835,9 +2835,21 @@ static int shader_skipped(const GfxShader *sh, uint32_t *last) {
     return skip_on && id == skip_id;
 }
 
+// TOTK_SHADOW_RES=off (resolution.c): the sun shadow map is the one square depth target drawn with no colour
+// attachment, so dropping those draws leaves it at the value it was cleared to and nothing comes out shadowed. The
+// whole shadow pass is then work the GPU never does.
+static int shadow_pass_off(const VkExec *ex) {
+    if (!res_shadow_disabled() || !ex->depth.image) return 0;
+    if (ex->depth.width != ex->depth.height || ex->depth.width != res_shadow_map_side()) return 0;
+    for (int i = 0; i < 8; i++)
+        if (ex->color[i].image) return 0;
+    return 1;
+}
+
 static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     skip_tick();
     if (ex->render_disabled) return skip_note(SK_RENDER_OFF);
+    if (shadow_pass_off(ex)) return skip_note(SK_SHADOW_OFF);
     cb_res(ex);
     dummies_init();
     if (ex->pass_noatt) {   // no attachment: the pass covers this draw's viewport or scissor, reopened when it needs more

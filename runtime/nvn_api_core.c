@@ -290,6 +290,14 @@ NVN_API(nvnMemoryPoolInitialize) {
                (void *)o->mem, o->flags, (unsigned long long)o->size);
         ok = 0;
     }
+    // TOTK_SHADOW_PROBE: where the game's big pools sit in its own memory. The game carves them from the
+    // application pool one after another (their sizes are a table at main+0x146e6xx) and budgets what is left for
+    // streaming, so enlarging one does not overlap its neighbour but does come off that rest: 180 MiB more of the
+    // graphics pool cut the draw distance of town NPCs from about 30 m to 3 m. Measured with this, 2026-11-13.
+    if (ok && o->size >= (32u << 20) && rt_knob("SHADOW_PROBE", "0"))
+        rt_log("shadow probe: pool %#llx..%#llx, %llu MiB, flags %#x",
+               (unsigned long long)(uintptr_t)o->game_mem,
+               (unsigned long long)((uintptr_t)o->game_mem + o->size), (unsigned long long)(o->size >> 20), o->flags);
     if (ok && pool_gpu_visible(o)) index_add(o);
     if (!ok) {
         if (nvn_gpu_only((uintptr_t)o->mem)) gva_free((uintptr_t)o->mem);

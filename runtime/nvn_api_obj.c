@@ -149,12 +149,32 @@ NVN_API(nvnTextureBuilderGetPackagedTextureData) { ret_x(c, (uintptr_t)TB(c)->pk
 static uint64_t storage_class(const nvn_texdesc *d) { return d->target == NVN_TEXTURE_TARGET_BUFFER ? 0 : 1; }
 NVN_API(nvnTextureBuilderGetStorageClass) { ret_x(c, storage_class(&TB(c)->d)); }
 NVN_API(nvnTextureBuilderGetFlags) { ret_x(c, (uint32_t)TB(c)->d.flags); }
+// What a bigger shadow map (TOTK_SHADOW_RES, resolution.c) costs the game: nothing. Its storage in the game's own
+// memory pool is bookkeeping for a depth target the CPU never reads and the back end holds as its own image, so the
+// game is told the size of the 1024 map it sized its pool for. Growing that pool instead is what broke this: the
+// pools are carved from the application pool one after another and the game budgets the rest for streaming, so the
+// 180 MiB we added at 4096 came off that rest and cut the draw distance of town NPCs from about 30 m to 3 m
+// (measured 2026-11-13). Nothing else in the game is a square depth texture of that side.
+static uint64_t storage_size_for_game(const nvn_texdesc *d, uint64_t size) {
+    uint32_t side = res_shadow_side();
+    if (side <= 1024 || d->width != side || d->height != side) return size;
+    if (d->format < NVN_FORMAT_STENCIL8 || d->format > NVN_FORMAT_DEPTH32F_STENCIL8) return size;
+    nvn_texdesc own = *d;
+    own.width = own.height = 1024;
+    nvn_texlayout L;
+    nvn_tex_layout(&own, &L);
+    if (rt_knob("SHADOW_PROBE", "0"))
+        rt_log("shadow probe: %ux%u depth texture reported to the game as %llu KiB, really %llu KiB", d->width,
+               d->height, (unsigned long long)(L.size >> 10), (unsigned long long)(size >> 10));
+    return L.size;
+}
+
 // size_t nvnTextureBuilderGetStorageSize(const NVNtextureBuilder *b)
 NVN_API(nvnTextureBuilderGetStorageSize) {
     nvn_texlayout L;
     nvn_tex_layout(&TB(c)->d, &L);
     if (!L.bpb) rt_log("nvn: TextureBuilderGetStorageSize: unknown format %#x", TB(c)->d.format);
-    ret_x(c, L.size);
+    ret_x(c, storage_size_for_game(&TB(c)->d, L.size));
 }
 // size_t nvnTextureBuilderGetStorageAlignment(const NVNtextureBuilder *b)
 NVN_API(nvnTextureBuilderGetStorageAlignment) {
