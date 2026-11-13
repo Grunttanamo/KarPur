@@ -130,6 +130,248 @@ static int nmod_files, cap_mod_files, mod_file_failed, mod_files_sorted;
 
 // object_generation_range_array.bin of Violet 4.0.0: its packed and unpacked size and fingerprint, so another file or
 // game version is left alone; then offset, type and value of each field.
+// TOTK_NO_EXCLUSIVES: the three species tables of world/data/encount, by unpacked size and the fingerprint of
+// their packed bytes (Violet 4.0.0; tools/exclusives.py reports them for another version).
+static const struct { uint64_t unpacked, print; } excl_files[] = {
+    {34724, 0x888111ef69f71aa3ull}, {36784, 0x8ae3f9b2548a5528ull}, {58984, 0x0a60102c8801df28ull},
+};
+static int excl_on;
+
+// An entry of those tables carries versiontable { A: bool, B: bool }, and a wild Pokemon exclusive to one edition
+// does not store `false` for the other: that field is absent, so FlatBuffers answers with the default, which is no.
+// Both editions ship the same data (docs/progress.md 2026-11-13).
+// Making both flags read the one stored byte is all it takes, and it needs no rewritten file: a FlatBuffer table
+// reaches its fields through a vtable, and several tables share one. Violet 4.0.0 has one vtable for each edition's
+// exclusives - one holds both slots with the other edition's absent, the other is two bytes short and has no slot
+// for it at all - and in both the stored flag sits at the same offset in the entry. So the vtable that has room
+// gets its absent slot pointed at that offset, and the entries of the short one are pointed at that vtable: one
+// slot and one vtable reference per entry, all inside the file. Found by walking rather than written down, so the
+// next game version needs no new offsets; anything that does not look exactly like this is left alone.
+#define EXCL_SLOT 28   // versiontable's slot in an entry (devid 0 .. bringItem 29)
+#define EXCL_MAX 512
+
+static uint32_t fb_u32(const uint8_t *b, uint64_t at) {
+    uint32_t v;
+    memcpy(&v, b + at, 4);
+    return v;
+}
+
+static uint16_t fb_u16(const uint8_t *b, uint64_t at) {
+    uint16_t v;
+    memcpy(&v, b + at, 2);
+    return v;
+}
+
+static int64_t fb_vtable(const uint8_t *b, uint64_t pos) {
+    int32_t d;
+    memcpy(&d, b + pos, 4);
+    return (int64_t)pos - d;
+}
+
+// The field's offset from the table's start, or 0 when the table's vtable has no slot for it or leaves it absent.
+static uint16_t fb_slot(const uint8_t *b, uint64_t n, uint64_t pos, unsigned slot) {
+    int64_t vt = fb_vtable(b, pos);
+    if (vt < 0 || (uint64_t)vt + 4 > n) return 0;
+    uint16_t size = fb_u16(b, (uint64_t)vt);
+    uint64_t at = 4 + 2 * (uint64_t)slot;
+    return at + 2 <= size && (uint64_t)vt + at + 2 <= n ? fb_u16(b, (uint64_t)vt + at) : 0;
+}
+
+static void excl_fix(uint8_t *b, uint64_t n) {
+    if (n < 32) return;
+    uint64_t root = fb_u32(b, 0);
+    uint16_t vo = root + 8 <= n ? fb_slot(b, n, root, 0) : 0;   // the root's only field is the vector of entries
+    if (!vo || root + vo + 4 > n) return;
+    uint64_t v = root + vo;
+    v += fb_u32(b, v);
+    if (v + 4 > n) return;
+    uint32_t count = fb_u32(b, v);
+    if (!count || count > 100000 || v + 4 + 4 * (uint64_t)count > n) return;
+    uint64_t pos[EXCL_MAX];
+    int64_t vts[EXCL_MAX];
+    int many = 0, both = 0;
+    uint16_t off = 0;
+    for (uint32_t k = 0; k < count; k++) {
+        uint64_t e = v + 4 + 4 * (uint64_t)k;
+        e += fb_u32(b, e);
+        if (e + 4 > n) return;
+        uint16_t so = fb_slot(b, n, e, EXCL_SLOT);
+        if (!so || e + so + 4 > n) continue;
+        uint64_t vp = e + so;
+        vp += fb_u32(b, vp);
+        if (vp + 4 > n) return;
+        uint16_t a = fb_slot(b, n, vp, 0), bb = fb_slot(b, n, vp, 1);
+        if (a && bb) {
+            both++;
+            continue;
+        }
+        if (!a && !bb) continue;        // neither flag: the game's own default decides, nothing to do
+        if (off && (a ? a : bb) != off) return;   // the stored flag must sit at one offset in all of them
+        off = a ? a : bb;
+        if (many == EXCL_MAX) return;
+        pos[many] = vp;
+        vts[many++] = fb_vtable(b, vp);
+    }
+    if (!many || !both) return;
+    int64_t target = -1;   // a vtable with room for both slots: the one whose other edition's slot is only absent
+    for (int i = 0; i < many; i++)
+        if ((uint64_t)vts[i] + 8 <= n && fb_u16(b, (uint64_t)vts[i]) >= 8) target = vts[i];
+    if (target < 0) return;
+    uint16_t a = fb_u16(b, (uint64_t)target + 4), bb = fb_u16(b, (uint64_t)target + 6);
+    if ((a != 0 && a != off) || (bb != 0 && bb != off) || (a && bb)) return;
+    memcpy(b + (uint64_t)target + (a ? 6 : 4), &off, 2);   // both slots now read the stored byte
+    int moved = 0;
+    for (int i = 0; i < many; i++) {
+        if (vts[i] == target) continue;
+        int32_t d = (int32_t)((int64_t)pos[i] - target);
+        memcpy(b + pos[i], &d, 4);   // this entry's versiontable uses the vtable that has room
+        moved++;
+    }
+    uint64_t k = __atomic_add_fetch(&applied, 1, __ATOMIC_RELAXED);
+    if (k <= 64)
+        rt_log("data patch: no version exclusives: %d of %u entries freed (%d pointed at the other vtable), flag at "
+               "+%u", many, count, moved, off);
+}
+
+// TOTK_NO_TRADE_EVO: Pokemon that evolve only by trading cannot evolve at all in a port with no trading, so the
+// condition becomes a level instead. The species table is avalon/data/personal_array.bin (pack 799, Oodle-kraken,
+// 122439 -> 412572 bytes; Violet 4.0.0): a vector of 1424 entries, field 0 the species number and field 23 a
+// vector of 16-byte evolution structs { u16 level, u16 method, u16 argument, u16 x3, u16 target species, u16 }.
+// Method 5 is "by trading" and method 4 "on reaching a level", with the level in the struct's first field, so the
+// change fits inside the struct: two bytes for the method, two for the level, and the file keeps its size. Read
+// from the bytes, not from a list: docs/progress.md 2026-11-13 says how, and how the methods were identified.
+// The levels are the maintainer's choice, each above the level the Pokemon itself appears at.
+// Trade evolutions that also need a held item (method 6) are not these: their item is a national number, while
+// every method that works without trading counts items in a small space of its own that Violet's data does not
+// map for those items. They stay as they are.
+#define EVO_SLOT 23      // the evolution vector's slot in a species entry
+#define EVO_STRUCT 16    // bytes per evolution
+#define EVO_TRADE 5      // method: by trading
+#define EVO_LEVEL 4      // method: on reaching the level in the struct's first field
+#define EVO_TRADE_ITEM 6 // method: by trading while holding an item; the argument is the item's national number
+#define EVO_HOLD_ITEM 19       // method: it levels up by day holding the item; the argument is the item's plibID
+#define EVO_HOLD_ITEM_NIGHT 20 // the same by night
+// National item number -> plibID. Every method that works without trading counts items in a small space of its
+// own: world/data/battle/plib_item_conversion (pack 21985) maps the two as ItemTableArray { itemID, plibID }, and
+// the game's own data confirms it (plibID 1..6 are the national 80..85, the five stones; Pikachu's method-8
+// argument is 4, the Thunder Stone; method 19's are the Razor Claw and the Oval Stone).
+// Method 19, not 8: these items cannot be used on a Pokemon at all, only held, so "the item is used" leaves the
+// evolution just as unreachable as trading did (the maintainer's test, 2026-11-13). 19 is "levels up by day
+// holding it", which is the game's own way of evolving a Pokemon that holds something; a variant without a time
+// of day does not exist, and the second one, 20, is the same by night. One struct holds one method, so it is day.
+// Only the items Violet already gives a plibID are here. The King's Rock, the Metal Coat, the two Deep Sea items,
+// the Sachet and the Whipped Dream have none: their rows in that table hold a plibID and no item at all, and
+// adding one means writing a field that is absent, so those evolutions stay as they are (docs/progress.md).
+// Where the maintainer chose another item than the one the entry names, because that one has no plibID and so
+// cannot be named to the game at all. Keyed on the target as well, since Clamperl has two of these and they must
+// stay apart. The numbers are national item numbers with the plibID beside them.
+static const struct { uint16_t species, target, plib, method; } evo_item_own[] = {
+    {61, 186, 87, EVO_HOLD_ITEM},    // Poliwhirl -> Politoed: item 2345 for the King's Rock (221, no plibID)
+    {79, 199, 87, EVO_HOLD_ITEM},    // Slowpoke -> Slowking: the same
+    {366, 367, 111, EVO_HOLD_ITEM},  // Clamperl -> Huntail: item 537 for the Deep Sea Tooth (226, no plibID)
+    {366, 368, 27, EVO_HOLD_ITEM},   // Clamperl -> Gorebyss: item 299, so the two stay apart
+};
+
+// Where a trade-with-item evolution takes a level instead, because no item the game can name suited it. The
+// maintainer's levels. Tried with a substitute item first (the Metal Alloy for Onix and Scyther, a Sweet for
+// Spritzee and Swirlix) and it did not evolve them in play, so the item is out of the condition altogether.
+static const struct { uint16_t species, target, level; } evo_item_level[] = {
+    {95, 208, 40},    // Onix -> Steelix
+    {123, 212, 30},   // Scyther -> Scizor
+    {682, 683, 20},   // Spritzee -> Aromatisse
+    {684, 685, 20},   // Swirlix -> Slurpuff
+};
+
+static const struct { uint16_t item, plib; const char *name; } evo_item[] = {
+    {235, 118, "Dragon Scale"},   {252, 113, "Up-Grade"},     {321, 117, "Protector"},
+    {322, 115, "Electirizer"},    {323, 116, "Magmarizer"},   {324, 114, "Dubious Disc"},
+    {325, 112, "Reaper Cloth"},   {537, 111, "Prism Scale"},
+};
+static const struct { uint64_t unpacked, print; } evo_file[] = {{412572, 0x015856eb1c2b489aull}};
+static const struct { uint16_t species, level; const char *name; } trade_evo[] = {
+    {64, 40, "Kadabra"},  {67, 39, "Machoke"},   {75, 36, "Graveler"}, {93, 42, "Haunter"},
+    {525, 35, "Boldore"}, {533, 40, "Gurdurr"},  {708, 30, "Phantump"}, {710, 30, "Pumpkaboo"},
+};
+static int evo_on;
+
+static void evo_fix(uint8_t *b, uint64_t n) {
+    if (n < 32) return;
+    uint64_t root = fb_u32(b, 0);
+    uint16_t vo = root + 8 <= n ? fb_slot(b, n, root, 0) : 0;
+    if (!vo || root + vo + 4 > n) return;
+    uint64_t v = root + vo;
+    v += fb_u32(b, v);
+    if (v + 4 > n) return;
+    uint32_t count = fb_u32(b, v);
+    if (!count || count > 100000 || v + 4 + 4 * (uint64_t)count > n) return;
+    int done = 0, items = 0, left = 0;
+    for (uint32_t k = 0; k < count; k++) {
+        uint64_t e = v + 4 + 4 * (uint64_t)k;
+        e += fb_u32(b, e);
+        if (e + 4 > n) return;
+        uint16_t so = fb_slot(b, n, e, 0), eo = fb_slot(b, n, e, EVO_SLOT);
+        if (!so || !eo || e + so + 2 > n || e + eo + 4 > n) continue;
+        uint16_t species = fb_u16(b, e + so);
+        uint64_t ev = e + eo;
+        ev += fb_u32(b, ev);
+        if (ev + 4 > n) return;
+        uint32_t m = fb_u32(b, ev);
+        if (m > 64 || ev + 4 + (uint64_t)m * EVO_STRUCT > n) continue;
+        for (uint32_t j = 0; j < m; j++) {
+            uint64_t at = ev + 4 + (uint64_t)j * EVO_STRUCT;
+            uint16_t method = fb_u16(b, at + 2), target = fb_u16(b, at + 12);
+            if (method == EVO_TRADE) {
+                uint16_t level = 0;
+                for (size_t i = 0; i < sizeof trade_evo / sizeof *trade_evo; i++)
+                    if (trade_evo[i].species == species) level = trade_evo[i].level;
+                if (!level) {   // a trade evolution this build has no level for: left alone, and said so
+                    left++;
+                    rt_log("data patch: species %u evolves by trading into %u and has no level here; left alone",
+                           species, target);
+                    continue;
+                }
+                uint16_t to = EVO_LEVEL;
+                memcpy(b + at, &level, 2);
+                memcpy(b + at + 2, &to, 2);
+                done++;
+            } else if (method == EVO_TRADE_ITEM) {
+                uint16_t item = fb_u16(b, at + 4), plib = 0, to = EVO_HOLD_ITEM, level = 0;
+                for (size_t i = 0; i < sizeof evo_item_level / sizeof *evo_item_level; i++)
+                    if (evo_item_level[i].species == species && evo_item_level[i].target == target)
+                        level = evo_item_level[i].level;
+                if (level) {   // no item in the condition at all: a level, as the plain trade evolutions have
+                    uint16_t lv = EVO_LEVEL;
+                    memcpy(b + at, &level, 2);
+                    memcpy(b + at + 2, &lv, 2);
+                    memcpy(b + at + 4, &plib, 2);   // the item number has no meaning for method 4
+                    done++;
+                    continue;
+                }
+                for (size_t i = 0; i < sizeof evo_item_own / sizeof *evo_item_own; i++)
+                    if (evo_item_own[i].species == species && evo_item_own[i].target == target)
+                        plib = evo_item_own[i].plib, to = evo_item_own[i].method;
+                if (!plib)
+                    for (size_t i = 0; i < sizeof evo_item / sizeof *evo_item; i++)
+                        if (evo_item[i].item == item) plib = evo_item[i].plib;
+                if (!plib) {   // an item with no plibID: it cannot be named to the game, so this one stays
+                    left++;
+                    rt_log("data patch: species %u evolves by trading into %u while holding item %u, which has no "
+                           "plibID here; left alone", species, target, item);
+                    continue;
+                }
+                memcpy(b + at + 2, &to, 2);
+                memcpy(b + at + 4, &plib, 2);
+                items++;
+            }
+        }
+    }
+    if (!done && !items && !left) return;
+    uint64_t c = __atomic_add_fetch(&applied, 1, __ATOMIC_RELAXED);
+    if (c <= 64)
+        rt_log("data patch: no trade evolutions: of %u species entries, %d now evolve on a level and %d on a level "
+               "while holding an item, %d left alone", count, done, items, left);
+}
+
 static const struct { uint32_t at; char type; double value; const char *name; } population[] = {
     {0xd4, 'f', 20, "wild Pokemon: nearest they appear"},
     {0xd8, 'f', 60, "wild Pokemon: farthest they appear"},
@@ -373,7 +615,15 @@ void data_patch_init(void) {
     }
     const char *mod_list = cfg_get("TOTK_MOD_FILES");
     int mfs = mod_list && *mod_list && strcmp(mod_list, "0");
-    if (view == 1.0f && spawn == 1.0f && count == 1.0f && !mods && !uis && !mfs) return;
+    // TOTK_NO_EXCLUSIVES=1 (or a list's path): the vtable bytes that let the other edition's exclusive wild Pokemon
+    // spawn here too (game/exclusives.txt, written by tools/exclusives.py; off by default - the game's own
+    // behaviour). 66 entries of the three species tables are exclusive, and 6 bytes cover them all, since the
+    // exclusives of one edition share one vtable.
+    const char *excl = cfg_get("TOTK_NO_EXCLUSIVES");
+    int excls = excl && *excl && strcmp(excl, "0");
+    const char *tev = cfg_get("TOTK_NO_TRADE_EVO");
+    int tevs = tev && *tev && strcmp(tev, "0");
+    if (view == 1.0f && spawn == 1.0f && count == 1.0f && !mods && !uis && !mfs && !excls && !tevs) return;
     int skipped = 0;
     if (view != 1.0f || spawn != 1.0f || count != 1.0f) {
         const char *path = cfg_get("TOTK_DATA_PATCH_LIST");
@@ -386,6 +636,22 @@ void data_patch_init(void) {
         int n = load_list(path, 1, 1, 1, 1, &skipped);
         if (n < 0) rt_log("data patch: MOD_VALUES set, but no list %s (tools/mod_report.py --apply writes it)", path);
         else rt_log("data patch: %d values of a mod from %s", n, path);
+    }
+    if (excls) {
+        if (strcmp(excl, "1")) {   // a list of its own, for another game version (tools/exclusives.py --out)
+            int n = load_list(excl, 1, 1, 1, 1, &skipped);
+            if (n < 0) rt_log("data patch: NO_EXCLUSIVES=%s is not a list (tools/exclusives.py writes one); the "
+                              "editions keep their exclusive Pokemon", excl);
+            else rt_log("data patch: %d version-exclusive bytes from %s: both editions' wild Pokemon spawn", n, excl);
+        } else {
+            excl_on = 1;
+            rt_log("data patch: no version exclusives: both editions' exclusive wild Pokemon spawn");
+        }
+    }
+    if (tevs) {
+        evo_on = 1;
+        rt_log("data patch: no trade evolutions: the %zu Pokemon that only evolve by trading evolve on a level",
+               sizeof trade_evo / sizeof *trade_evo);
     }
     if (uis) {
         const char *path = ui && *ui && strcmp(ui, "1") ? ui : "game/ui_patch.txt";
@@ -604,6 +870,21 @@ void data_patch_decoded(const uint8_t *packed, uint64_t packed_n, uint8_t *out, 
         if (k <= 64) rt_log("data patch: %s in a packed file (+%#llx) %s%g", f->name, (unsigned long long)f->at,
                             f->absolute ? "= " : "x", f->absolute ? f->value : f->factor);
     }
+    if (evo_on && !dry) {
+        uint64_t head = packed_n < 4096 ? packed_n : 4096;
+        for (size_t i = 0; i < sizeof evo_file / sizeof *evo_file; i++) {
+            if (evo_file[i].unpacked != n) continue;
+            if (print_head != head) print = fnv1a64(packed, head), print_head = head;
+            if (print == evo_file[i].print) evo_fix(out, n);
+        }
+    }
+    if (excl_on && !dry)
+        for (size_t i = 0; i < sizeof excl_files / sizeof *excl_files; i++) {
+            if (excl_files[i].unpacked != n) continue;
+            uint64_t head = packed_n < 4096 ? packed_n : 4096;
+            if (print_head != head) print = fnv1a64(packed, head), print_head = head;
+            if (print == excl_files[i].print) excl_fix(out, n);
+        }
     for (int i = 0; i < ntexts; i++) {
         MsgText *t = &texts[i];
         uint64_t head = t->packed < 4096 ? t->packed : 4096;
