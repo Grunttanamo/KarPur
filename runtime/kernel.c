@@ -82,6 +82,7 @@ struct RtThread {
     RtThread *all;             // every thread
     // virtual core
     int cur_core;              // core held while running guest code, -1 while blocked
+    int need_core;             // KarPur TOTK_CORE_LAZY: asked its core number since its last own wait: runs on one
     uint64_t cseq;
     RtThread *cnext;
     uint8_t *tlr, *tls;
@@ -100,6 +101,7 @@ struct RtThread {
     uint64_t wake_at, grant_at;   // when a wait was signalled and a core granted, until the thread runs again
     uint64_t lw_ns, lw_n, lw_max, lg_ns, lg_n, lg_max, sl_n, sl_req, sl_act;   // those latencies; SleepThread asked/took
     uint64_t sp_n, sp_ho, sp_site;   // spin wait passes and core handoffs, the last loop head (the thread writes them)
+    uint64_t nq, nq_all;             // KarPur: GetCurrentProcessorNumber calls in this report window, in all
     RtThread *target;          // as a core waiter: the owner core_kick asked to give its core up for it (holding G)
     // TOTK_ASYNC_PREEMPT (holding G)
     PlatIntr *hthr;            // the host thread, for plat_intr_stop / resume; open while it may own a core
@@ -307,6 +309,23 @@ static uint32_t block_inner(RtThread *t, int kind, int64_t ns) {
 // once; guest code without either keeps the core until it reaches one. TOTK_FREE_CORES=1 turns the gate off.
 static RtThread *g_core_owner[NCORE], *g_core_wait;
 static int g_cores_on = -1, g_held_max;
+// KarPur TOTK_CORE_LAZY=1 (default 0): a thread runs without a virtual core, like TOTK_FREE_CORES, until it asks its
+// core number (GetCurrentProcessorNumber, how the game finds its per-core data). From then until its own next wait or
+// sleep it holds a core under the rules above, also across preemptions, host calls and yields (a thread pinned to a
+// core on Horizon never runs beside the thread that preempted it). So code that indexes per-core data keeps that core
+// to itself, and the rest of the game's threads may use the PC's other cores.
+static int g_core_lazy = -1;
+static uint64_t g_lazy_take, g_lazy_wait, g_lazy_wait_ns;   // holding G: lazy core takes, those that waited, their wait
+
+static int core_lazy(void) {
+    if (g_core_lazy < 0) {
+        const char *e = cfg_get("TOTK_CORE_LAZY");
+        g_core_lazy = e && *e && strcmp(e, "0");
+        if (g_core_lazy)
+            rt_log("kernel: threads run without a virtual core until they ask their core number (TOTK_CORE_LAZY)");
+    }
+    return g_core_lazy;
+}
 
 static void diag_init(void);
 static void ap_init(void);
@@ -945,7 +964,7 @@ static void core_kick(void) {
 
 static void core_take(RtThread *t) {
     if (t->cur_core >= 0) return;
-    if (!cores_enabled()) {
+    if (!cores_enabled() || (core_lazy() && !t->need_core)) {
         acct(t, S_RUN);
         return;
     }
@@ -1008,6 +1027,7 @@ static uint32_t block(RtThread *t, int kind, int64_t ns) {
     t->waker = 0;
     if (ns == 0) return block_inner(t, kind, ns);
     core_put(t);
+    t->need_core = 0;   // TOTK_CORE_LAZY: its own wait ends its use of the core number
     acct(t, st_of(kind));
     t->nblk++;
     uint32_t r = block_inner(t, kind, ns);
@@ -1218,7 +1238,7 @@ void kern_sched_report(uint64_t frame) {
         uint32_t h;
         int prio, render;
         uint64_t mask, entry, ns[S_N], nblk, npre, cpu, lw_ns, lw_n, lw_max, lg_ns, lg_n, lg_max, sl_n, sl_req, sl_act;
-        uint64_t sp_n, sp_ho, sp_site;
+        uint64_t sp_n, sp_ho, sp_site, nq, nq_all;
     } Row;
     Row rows[REP_N + 1];
     WaitRec rw[2][4] = {0};   // the render and the main thread's longest waits
@@ -1272,6 +1292,7 @@ void kern_sched_report(uint64_t frame) {
         r->lg_ns = t->lg_ns, r->lg_n = t->lg_n, r->lg_max = t->lg_max;
         r->sl_n = t->sl_n, r->sl_req = t->sl_req, r->sl_act = t->sl_act;
         r->sp_n = t->sp_n, r->sp_ho = t->sp_ho, r->sp_site = t->sp_site;
+        r->nq = t->nq, r->nq_all = t->nq_all;
         r->cpu = 0;
         uint64_t c = t->tid ? plat_thread_cpu_ns(t->tid) : 0;
         if (c) {
@@ -1290,11 +1311,13 @@ void kern_sched_report(uint64_t frame) {
                 }
     }
     uint64_t pre_stale = g_pre_stale, pre_req = g_pre_req, pre_n = g_pre_n, pre_ns = g_pre_ns, pre_max = g_pre_max;
-    uint64_t sc = g_sync_calls, sb = g_sync_blocks;
+    uint64_t sc = g_sync_calls, sb = g_sync_blocks, lzt = g_lazy_take, lzw = g_lazy_wait, lzn = g_lazy_wait_ns;
+    g_lazy_take = g_lazy_wait = g_lazy_wait_ns = 0;
     for (RtThread *t = g_all; t; t = t->all) {
         memset(t->st_ns, 0, sizeof t->st_ns);
         t->nblk = t->npre = 0;
         t->lw_ns = t->lw_n = t->lw_max = t->lg_ns = t->lg_n = t->lg_max = t->sl_n = t->sl_req = t->sl_act = 0;
+        t->nq = 0;
         t->sp_n = t->sp_ho = 0;   // racy against the thread's own increments: a few passes may be lost
     }
     memset(g_rw, 0, sizeof g_rw);
@@ -1308,6 +1331,9 @@ void kern_sched_report(uint64_t frame) {
            (unsigned long long)frame, span / 1e9, (double)all_run / span, NCORE, all_core / 1e9,
            (unsigned long long)pre_req, (unsigned long long)pre_n, pre_n ? pre_ns / 1e6 / pre_n : 0.0, pre_max / 1e6,
            (unsigned long long)sc, (unsigned long long)sb, (unsigned long long)pre_stale, self ? "" : " (render thread is not a guest thread)");
+    if (g_core_lazy > 0)
+        rt_log("sched: lazy cores: %llu takes at a core query, %llu waited over 20 us, %.2f ms waiting in all",
+               (unsigned long long)lzt, (unsigned long long)lzw, lzn / 1e6);
     for (int i = 0; i < nr; i++) {
         Row *r = &rows[i];
         char d[128], s[256];
@@ -1315,9 +1341,10 @@ void kern_sched_report(uint64_t frame) {
         for (int k = S_RUN; k < S_N; k++)
             o += snprintf(s + o, sizeof s - o, " %s %.0f%%", s_name[k], 100.0 * r->ns[k] / span);
         ldr_describe(r->entry, d, sizeof d);
-        rt_log("sched: %s%#x p%d m%llx%s cpu %.0f%% blocks %llu preempted %llu (%s)", r->render ? "render " : "",
-               r->h, r->prio, (unsigned long long)r->mask, s, 100.0 * r->cpu / span, (unsigned long long)r->nblk,
-               (unsigned long long)r->npre, r->entry ? d : "main");
+        rt_log("sched: %s%#x p%d m%llx%s cpu %.0f%% blocks %llu preempted %llu core queries %llu (%llu in all) (%s)",
+               r->render ? "render " : "", r->h, r->prio, (unsigned long long)r->mask, s, 100.0 * r->cpu / span,
+               (unsigned long long)r->nblk, (unsigned long long)r->npre, (unsigned long long)r->nq,
+               (unsigned long long)r->nq_all, r->entry ? d : "main");
         rt_log("sched:   %#x wake to run avg %.1f us max %.0f us (%llu), core grant to run avg %.1f us max %.0f us "
                "(%llu), sleep %llu asked avg %.1f us took avg %.1f us", r->h, r->lw_n ? r->lw_ns / 1e3 / r->lw_n : 0.0,
                r->lw_max / 1e3, (unsigned long long)r->lw_n, r->lg_n ? r->lg_ns / 1e3 / r->lg_n : 0.0, r->lg_max / 1e3,
@@ -1693,6 +1720,7 @@ int kern_svc(Cpu *c, uint32_t imm) {
         if (ns > 0) {
             lock();
             core_put(t);
+            t->need_core = 0;
             acct(t, S_SLEEP);
             t->wobj = (uint64_t)ns;
             t->nblk++;
@@ -1772,7 +1800,18 @@ int kern_svc(Cpu *c, uint32_t imm) {
     }
     case 0x10: {   // GetCurrentProcessorNumber: the virtual core held
         RtThread *t = cur(imm);
+        if (t->cur_core < 0 && cores_enabled() && core_lazy()) {   // TOTK_CORE_LAZY: from here on it needs its core
+            lock();
+            t->need_core = 1;
+            uint64_t w0 = kern_now_ns();
+            core_take(t);
+            uint64_t w = kern_now_ns() - w0;
+            g_lazy_take++;
+            if (w > 20000) g_lazy_wait++, g_lazy_wait_ns += w;
+            unlock();
+        }
         x[0] = (uint64_t)(uint32_t)(t->cur_core >= 0 ? t->cur_core : t->core);
+        t->nq++, t->nq_all++;
         return 1;
     }
     case 0x36: {   // SynchronizePreemptionState: the SDK's spin locks call it after clearing TLR+0x100 (disable_count)
