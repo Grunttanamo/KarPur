@@ -25,6 +25,9 @@ import sys
 import time
 from pathlib import Path
 
+# As in build_game.py: with -P, -I or PYTHONSAFEPATH the script's folder is not on the search path (issue #45).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from check_content import GENERATED_MARKER
 
 MAGIC = b'TOTKRFS1'

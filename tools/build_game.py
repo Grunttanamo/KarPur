@@ -33,6 +33,11 @@ import time
 import urllib.request
 from pathlib import Path
 
+# Python only puts the script's own folder on the search path when it is started the usual way: with -P or -I, or
+# with PYTHONSAFEPATH set, it does not, and importing a tool beside this one fails (issue #45, a build that ran
+# for 75 minutes and then stopped at "No module named 'romfs_index'"). Say where the siblings are instead.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import romfs_index
 from build_shaders import stale as stale_shaders
 from cpu_march import march
