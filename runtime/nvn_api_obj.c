@@ -761,7 +761,15 @@ NVN_API(nvnQueuePresentTexture) {
     uint64_t slot = now + pace(&o->pace, now, period);
     gfx_backend()->present(t, o->crop, slot);
     o->ticket[idx] = o->presents;
-    o->avail[idx] = slot + period;
+    // TOTK_ACQUIRE_AHEAD=1: the image may be acquired again from its own display time (slot) instead of one period
+    // later. The present is a copy queued in submit order, so the image is free once it is queued; without
+    // TOTK_SUBMIT_SYNC the default made the game thread wait a whole period before it could start the next frame.
+    static int ahead = -1;
+    if (ahead < 0) {
+        ahead = rt_knob("ACQUIRE_AHEAD", "0");
+        if (ahead) rt_log("nvn: an image is acquired again at its display time, not one period later (TOTK_ACQUIRE_AHEAD)");
+    }
+    o->avail[idx] = slot + (RT_KNOB_ON(ahead) ? 0 : period);
     frame_step_present(slot, o->interval);   // frame_rate.c: the real-time step follows the display times
     value_scan_present(o->presents);         // KarPur value_scan.c: TOTK_VALUE_SCAN, TOTK_POKE
     coverage_present(o->presents);           // KarPur coverage.c: TOTK_COVERAGE
