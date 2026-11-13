@@ -229,12 +229,28 @@ static uint64_t captured_vertices(int prim, uint32_t n, uint32_t inst) {
     return v * (inst ? inst : 1);
 }
 
+// TOTK_XFB_SYNC=1 (off): a full barrier after every captured draw, not only when transform feedback ends.
+// For the device loss on RDNA 3 during character creation (issue #18): there, TOTK_XFB=0 avoids it (and ruins the
+// skinned models), while AMD's Crash Analysis avoids it with the models intact - and that instrumentation mainly
+// serializes the GPU's work. Forcing full barriers elsewhere (TOTK_BARRIER_TRACK=0) did not help, and the barrier
+// this file already adds comes once per pass, so the one place left without any ordering is between the captured
+// draws of one pass. Transform feedback is inactive here, so the barrier may end the pass.
+static int xfb_sync(void) {
+    static int on = -1;
+    if (on < 0) {
+        on = rt_knob("XFB_SYNC", "0");
+        if (on) rt_log("tf: a full barrier after every captured draw (TOTK_XFB_SYNC=1)");
+    }
+    return on;
+}
+
 void vk_xfb_draw_end(VkExec *ex, int prim, uint32_t n, uint32_t inst) {
     rec_drain();
     if (tf_draws <= 2) rt_log("tf: draw %d: drawn, ending", tf_draws);
     fn_end(ex->cb, 0, 0, NULL, NULL);
     if (tf_draws <= 2) rt_log("tf: draw %d: ended", tf_draws);
     ex->recorded++;
+    if (xfb_sync()) vk_exec_barrier(ex);
     uint64_t verts = captured_vertices(prim, n, inst);
     for (int b = 0; b < nbound; b++) {
         uint64_t bytes = verts * lay.stride[b], left = ex->xfb_buf[b].size - written[b];
