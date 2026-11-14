@@ -154,18 +154,18 @@ NVN_API(nvnTextureBuilderGetFlags) { ret_x(c, (uint32_t)TB(c)->d.flags); }
 // game is told the size of the 1024 map it sized its pool for. Growing that pool instead is what broke this: the
 // pools are carved from the application pool one after another and the game budgets the rest for streaming, so the
 // 180 MiB we added at 4096 came off that rest and cut the draw distance of town NPCs from about 30 m to 3 m
-// (measured 2026-11-13). Nothing else in the game is a square depth texture of that side.
+// (measured 2026-11-13). Both targets the patch site builds at that side are covered: the depth map and the R8UI
+// companion beside it, which cost 8 and 2 MiB at the game's own 1024 and 128 and 32 at 4096. Nothing else in the
+// game is square at that side.
 static uint64_t storage_size_for_game(const nvn_texdesc *d, uint64_t size) {
-    uint32_t side = res_shadow_side();
-    if (side <= 1024 || d->width != side || d->height != side) return size;
-    if (d->format < NVN_FORMAT_STENCIL8 || d->format > NVN_FORMAT_DEPTH32F_STENCIL8) return size;
+    if (!nvn_tex_shadow_grown(d)) return size;
     nvn_texdesc own = *d;
     own.width = own.height = 1024;
     nvn_texlayout L;
     nvn_tex_layout(&own, &L);
     if (rt_knob("SHADOW_PROBE", "0"))
-        rt_log("shadow probe: %ux%u depth texture reported to the game as %llu KiB, really %llu KiB", d->width,
-               d->height, (unsigned long long)(L.size >> 10), (unsigned long long)(size >> 10));
+        rt_log("shadow probe: %ux%u texture fmt %#x reported to the game as %llu KiB, really %llu KiB", d->width,
+               d->height, d->format, (unsigned long long)(L.size >> 10), (unsigned long long)(size >> 10));
     return L.size;
 }
 
@@ -309,7 +309,13 @@ NVN_API(nvnTextureGetFlags) { ret_x(c, (uint32_t)CTX(c)->d.flags); }
 NVN_API(nvnTextureGetWidth) { ret_x(c, CTX(c)->d.width); }
 NVN_API(nvnTextureGetHeight) { ret_x(c, CTX(c)->d.height); }
 NVN_API(nvnTextureGetDepth) { ret_x(c, CTX(c)->d.depth); }
-NVN_API(nvnTextureGetStorageSize) { ret_x(c, (uint32_t)(int)CTX(c)->L.size); }
+// The same number the builder gave the game, not the real one: the game sized its pool from the builder's answer and
+// placed other textures after the bytes it reserved, so a finished texture that now admits to being 32 times bigger
+// would make its own bookkeeping of that pool wrong (issue #61).
+NVN_API(nvnTextureGetStorageSize) {
+    const tex_t *t = CTX(c);
+    ret_x(c, (uint32_t)(int)storage_size_for_game(&t->d, t->L.size));
+}
 // NVNboolean nvnTextureCompare(const NVNtexture *a, const NVNtexture *b)
 NVN_API(nvnTextureCompare) {
     const tex_t *x = arg_p(c, 0), *y = arg_p(c, 1);

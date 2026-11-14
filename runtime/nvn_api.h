@@ -29,6 +29,19 @@ static inline int nvn_arg_bool(const Cpu *c, int i) { return (int)(arg_x(c, i) &
 #define NVN_POOL_MAGIC MAGIC('P', 'O', 'O', 'L')           // pool_t.magic of an initialized pool
 #define NVN_VPOOL_PAGE 0x10000ull                          // NVN virtual mapping granularity (64 KiB)
 static inline int nvn_gpu_only(uint64_t a) { return a - RT_GPU_VA_BASE < RT_GPU_VA_SIZE; }   // address in the GPU window
+// The shadow map, enlarged by TOTK_SHADOW_RES. The game is told it is the 1024 map it replaces
+// (nvn_api_obj.c storage_size_for_game), so it reserves a 1024 map's bytes for it and hands the bytes after those to
+// other textures. The image must therefore own its memory instead of aliasing the pool's (vk_texture.c): aliasing the
+// real layout writes 124 MiB past what the game reserved at 4096, over whatever the game put there (issue #61).
+// Any texture the game builds at the patched side (TOTK_SHADOW_RES): the function around main+0x16dc200 lays out two
+// descriptions from that one number, and the second is an R8UI companion of the depth map - 32 MiB at 4096 against
+// 2 at 1024. Reporting that one honestly while the depth map was under-reported took 30 MiB from the game's pool and
+// is what crashed the map screen at x4 (issue #61). Both are render targets the CPU never reads and the back end
+// holds as its own image, so both are reported as the 1024 ones they replace and both own their memory.
+static inline int nvn_tex_shadow_grown(const nvn_texdesc *d) {
+    uint32_t side = res_shadow_side();
+    return side > 1024 && d->width == side && d->height == side;
+}
 // A CPU-invisible physical or virtual pool lives in the GPU window: mem is its GPU address (never mapped on the host),
 // game_mem the game's storage (never touched), span the reserved window bytes, host NULL. Every other pool: mem is the
 // game's storage, the GPU address equals the guest address.

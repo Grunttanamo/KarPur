@@ -398,7 +398,9 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
     e->f = f;
     e->pub.addr = k->addr;
     VkImage img = VK_NULL_HANDLE;
-    if (nvn_gpu_only(k->addr)) {   // storage in a physical or virtual pool: alias the pool memory (section 3.2)
+    // An enlarged shadow map owns its memory: the game reserved a 1024 map's bytes for it in the pool and gave the
+    // rest to other textures, so aliasing the pool here would write over them (nvn_tex_shadow_grown, issue #61).
+    if (nvn_gpu_only(k->addr) && !nvn_tex_shadow_grown(d)) {   // storage in a pool: alias the pool memory (section 3.2)
         if (vkCreateImage(c->device, &ci, NULL, &img) == VK_SUCCESS && !bind_pool_memory(c, e, img, L.size)) {
             vkDestroyImage(c->device, img, NULL);
             img = VK_NULL_HANDLE;
@@ -415,6 +417,17 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
             free(e);
             return NULL;
         }
+    }
+    // One line per texture at the patched shadow side, so a log says what the setting really costs and where: the
+    // depth map is reported to the game as a 1024 one, anything else of that size is not and comes out of its pool.
+    if (nvn_tex_shadow_grown(d)) {
+        nvn_texdesc own = *d;                       // what the game was told for it: the 1024 texture it replaces
+        own.width = own.height = 1024;
+        nvn_texlayout told;
+        nvn_tex_layout(&own, &told);
+        rt_log("shadow size texture %ux%u, %u layer(s), fmt %#x: %llu KiB in %s; the game was told %llu KiB", w, h,
+               layers, d->format, (unsigned long long)(L.size >> 10),
+               e->alloc ? "our own memory" : "the game's pool", (unsigned long long)(told.size >> 10));
     }
     VkTexImage *p = &e->pub;
     p->image = img;
