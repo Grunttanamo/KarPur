@@ -162,6 +162,9 @@ int mem_freeze(uint64_t a);                                // makes the 2 MiB re
                                                            // mem_thaw thaws it; 1 frozen (or already), 0 refused
 int mem_frozen(uint64_t a);                                // the 2 MiB region of a is frozen: no page in it changed
                                                            // since its freeze
+extern void (*rt_mem_decommit_hook)(uint64_t a, uint64_t n);   // KarPur: called before guest pages are decommitted
+void mem_thaw_keep_watch(uint64_t a, uint64_t n);          // mem_thaw that leaves readback-watch pages armed
+int64_t mem_rbw_thaw_released(void);                       // armed pages mem_thaw released (TOTK_ARENA_DIAG)
 void mem_thaw(uint64_t a, uint64_t n);                     // makes the frozen regions over [a, a+n) writable again;
                                                            // before a kernel write (file read) into guest memory
 void mem_freeze_stats(uint64_t *frozen, uint64_t *freezes, uint64_t *fault_thaws, uint64_t *other_thaws);

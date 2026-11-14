@@ -172,9 +172,13 @@ static void thaw_locked(uint64_t r, int why) {
 }
 
 // frz_lock held exclusively. Releases the readback watch's pages in the range too.
+static volatile int64_t rbw_thaw_released;   // armed pages a mem_thaw released without a CPU touch (TOTK_ARENA_DIAG)
+int64_t mem_rbw_thaw_released(void) { return rbw_thaw_released; }
 static void thaw_range_locked(uint64_t a, uint64_t n, int why) {
     if (!n || a >= RT_ADDRESS_LIMIT) return;
+    int64_t before = rbw_armed;
     rbw_release_locked(a, n);
+    if (why == 2 && rbw_armed < before) rbw_thaw_released += before - rbw_armed;
     uint64_t r0 = a >> FRZ_SHIFT, r1 = (a + n - 1 < RT_ADDRESS_LIMIT ? a + n - 1 : RT_ADDRESS_LIMIT - 1) >> FRZ_SHIFT;
     for (uint64_t r = r0; r <= r1; r++) thaw_locked(r, why);
 }
@@ -182,6 +186,19 @@ static void thaw_range_locked(uint64_t a, uint64_t n, int why) {
 void mem_thaw(uint64_t a, uint64_t n) {
     plat_mutex_lock(&frz_lock);   // also when nothing is frozen: the hold keeps a read's buffer writable
     thaw_range_locked(a, n, 2);
+    plat_mutex_unlock(&frz_lock);
+}
+
+// KarPur: like mem_thaw, but leaves the readback watch's armed pages armed (inaccessible). For an import arena
+// (vk_memory.c arena_bind), which thaws a whole block around one pool: releasing the armed pages of the block would let
+// the game read pages the GPU has not finished writing back, in memory that has nothing to do with the pool (with
+// TOTK_READBACK_GUARD=1 such a read would otherwise wait for the GPU). The armed pages stay inaccessible, so the arena's
+// committed run stops at them.
+void mem_thaw_keep_watch(uint64_t a, uint64_t n) {
+    if (!n || a >= RT_ADDRESS_LIMIT) return;
+    plat_mutex_lock(&frz_lock);
+    uint64_t r0 = a >> FRZ_SHIFT, r1 = (a + n - 1 < RT_ADDRESS_LIMIT ? a + n - 1 : RT_ADDRESS_LIMIT - 1) >> FRZ_SHIFT;
+    for (uint64_t r = r0; r <= r1; r++) thaw_locked(r, 2);
     plat_mutex_unlock(&frz_lock);
 }
 
@@ -254,7 +271,11 @@ static void commit(uint64_t a, uint64_t n, const char *what) {
     if (!ok) rt_fatal("memory: commit %s %#llx+%#llx failed", what, (unsigned long long)a, (unsigned long long)n);
 }
 
+// KarPur: told before guest pages are decommitted (vk_memory.c import arenas), outside frz_lock: the hook may thaw.
+void (*rt_mem_decommit_hook)(uint64_t a, uint64_t n);
+
 static void decommit(uint64_t a, uint64_t n, const char *what) {
+    if (rt_mem_decommit_hook && n) rt_mem_decommit_hook(a, n);
     plat_mutex_lock(&frz_lock);
     thaw_range_locked(a, n, 3);
     int ok = !n || plat_mem_decommit(a, n);
