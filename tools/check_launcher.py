@@ -88,13 +88,18 @@ def build_exes():
     return out - {'llvm-ar.exe', 'llvm-windres.exe'}
 
 
-def ignored(paths):
-    """The paths of the list that git would leave out of the release payload."""
-    if not paths:
-        return []
-    r = subprocess.run(['git', 'check-ignore', '--stdin'], cwd=ROOT, input='\n'.join(paths),
-                       capture_output=True, text=True)
-    return [p for p in r.stdout.splitlines() if p]
+def left_out(paths):
+    """The paths of the list that tools/make_launcher.py would not put into payload.zip.
+
+    It packs what git tracks or would track, except everything under launcher/ and .github/ - the launcher's own
+    files are compiled or embedded into the executable instead (pins.json, the banners), so they belong there.
+    """
+    out = [p for p in paths if p.startswith(('launcher/', '.github/'))]
+    if paths:
+        r = subprocess.run(['git', 'check-ignore', '--stdin'], cwd=ROOT, input='\n'.join(paths),
+                           capture_output=True, text=True)
+        out += [p for p in r.stdout.splitlines() if p and p not in out]
+    return out
 
 
 def main():
@@ -144,8 +149,9 @@ def main():
     check('toolchain', sorted(exes - set(toolchain_msys2.TOOLS)),
           f'{len(exes)} executables called, {len(toolchain_msys2.TOOLS)} checked after unpacking')
 
-    need = build_tools() + ['launcher/pins.json', 'tools/data', 'recomp/patches.py', 'runtime/cfg.c']
-    check('payload', ignored(need), f'{len(need)} files the launcher needs on the player\'s PC')
+    need = build_tools() + ['tools/data', 'tools/vendor', 'tools/requirements.txt', 'recomp/patches.py',
+                            'recomp/gen.py', 'runtime/cfg.c', 'docs/launcher-checks.md']
+    check('payload', left_out(need), f'{len(need)} files the launcher needs on the player\'s PC')
 
     print()
     if bad:
