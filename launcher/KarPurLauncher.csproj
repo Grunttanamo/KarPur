@@ -17,7 +17,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>0.3.5</Version>
+    <Version>0.3.6</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- WFO1000: designer serialization of control properties; the launcher builds its controls in code -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>

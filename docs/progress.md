@@ -1,5 +1,206 @@
 # Progress
 
+## Checks before a launcher release, and what they already found (2026-11-14)
+
+- Three bugs in two days all sat on the launcher's own path, where a mistake reaches every player at once and
+  cannot be undone from inside the launcher. New `tools/check_launcher.py` runs five static checks, one per failure
+  class that has actually happened, and `docs/launcher-checks.md` (German, the maintainer runs it) holds them with
+  the manual steps a tool cannot take. `CLAUDE.md` points at both.
+- **What the first run found, which is the point of it:** two more live instances of the `cfg_value` family read
+  without a row in the settings table - `TOTK_SPIN` (`kernel.c`) and `TOTK_VRAM_HEADROOM` (`vk_headroom.c`). Both
+  were guarded by a `cfg_get` first, so they only fired with the key present but **empty** in karpur.ini, which is
+  narrow - and exactly as unnecessary as the one that killed the launcher on 2026-11-13. Both now use `rt_knob`,
+  which needs no row and treats an empty value as the default. The rule stays simple and checkable: no strict
+  reader without a row, no exceptions.
+- It also found `toolchain_msys2.TOOLS` naming `ar.exe`, which the build never calls, while `llvm-ar.exe`, which
+  it does name, is not even shipped by MSYS2's clang package (it serves `--make-lib`, a developer option). TOOLS
+  is now the four a launcher build really needs, and the check compares it against what the build scripts name, so
+  the two cannot drift apart again.
+- The five checks: `settings` (every strict read has a row), `keys` (every key the launcher writes is known to the
+  runtime), `tools` (every script the build runs exists and imports under `python -I`, the issue #45 class),
+  `toolchain` (issue #62), `payload` (nothing the player needs is git-ignored out of the release).
+- `missing()` was tested against five states in a temporary folder: empty, the issue #62 state (3 of 31 packages
+  with clang present - which the old check called complete), all packages but a binary gone, complete, and a
+  corrupt state file. Right in all five.
+- What a tool still cannot do, so it is in the checklist by hand: a build from an **empty** folder (only there do
+  the toolchain, extract, fonts and icon steps run at all), the shader pre-build line in the log, the selftest,
+  switching each new setting in the launcher rather than by environment variable, and playing - town NPCs at ~30 m,
+  the map at the highest shadow setting, a battle, an area change.
+
+## The map crash at x4: the companion texture was never under-reported (2026-11-14)
+
+- The measurement the entry below asked for, from the maintainer's x4 run:
+
+      shadow size texture 4096x4096, 2 layer(s), fmt 0x3:  32768 KiB in our own memory; the game was told 32768 KiB
+      shadow size texture 4096x4096, 2 layer(s), fmt 0x34: 131072 KiB in our own memory; the game was told 8192 KiB
+
+  So the lead was right. The patch site builds two targets at the patched side: the DEPTH32F map, correctly
+  reported as the 8 MiB 1024 one, and an **R8UI companion** (`NVN_FORMAT_R8UI`, 2 layers) which was reported at its
+  full size because `storage_size_for_game` only covered depth formats. 32 MiB against the 2 MiB the game sizes
+  its pool for at 1024, so **30 MiB came off the game's own budget at x4** - 6 MiB at 2048 and 16 at 3072, which is
+  why those two open the map and x4 does not.
+- **Fix:** `nvn_tex_shadow_grown` no longer tests the format at all. Any texture the game builds square at the
+  patched side is reported as the 1024 one it replaces and owns its memory; both of these are render targets the
+  CPU never reads and the back end holds as its own image, which is what made the trick sound for the depth map in
+  the first place. One predicate for both rules, so the two can no longer drift apart - which is exactly how this
+  bug came about.
+- **Confirmed in play by the maintainer:** the map opens at x4, and wild Pokemon and town NPCs are unchanged - the
+  30 MiB went back to the game's own budget, where it belonged.
+- The log line stays: it names every texture at the patched side with its real size, where its memory is, and what
+  the game was told, so a third one appearing later cannot go unnoticed.
+
+## It is the size, and the patch site builds two descriptions (2026-11-14)
+
+- Bisection, both on the maintainer's machine: `TOTK_SHADOW_RES=1024` (the patch **on**, handing the game its own
+  number) opens the map cleanly, and so does 2048. x4 crashes every time. So the patch mechanism is sound and the
+  size is what matters - the same conclusion the 2026-11-12 bisection reached, now for the map instead of the
+  load. The threshold lies above 2048; the reporter in #61 has x3 working, so between 3072 and 4096.
+- **A lead from the patch site's own code** (lifted code read with the maintainer's standing permission; behaviour
+  only). The function around `main+0x16dc200` lays out **two** descriptions from that one number: it stores
+  `width = height = <the patched side>` into two separate structures on its stack, each with a second field read
+  from `[x19 + 0x3d0]` - the neighbour of the patched field at `+0x3d4`, and not patched. Two lines before the
+  patched load, the address `x19 + 0x3d4` is handed to a virtual call, which is what fills the field our patch then
+  reads instead of.
+- Why that matters: `storage_size_for_game` under-reports only **depth** formats. A second target of the same side
+  that is not a depth texture is reported to the game at its real size and comes out of the same 268 MiB pool -
+  64 MiB at 4096 against 4 MiB at 1024, which is exactly the kind of amount that would make a pool of that size
+  run out, and exactly the failure the crash shows (a lookup that returns nothing).
+- **Measuring it before changing anything:** the log line now fires for *every* texture built at the patched side,
+  not only the depth map, and prints its real size, where its memory comes from, and what the game was told
+  (`nvn_tex_shadow_side` in `runtime/nvn_api.h`, the line in `runtime/vk_texture.c`). One run with x4 says whether
+  a second big target exists and what it costs. If it does, under-reporting it the same way is the fix; if the only
+  texture of that side is the depth map, the pool is not what runs out and the lead is wrong.
+
+## The map crash named: a LightEvent that was never initialized (2026-11-14)
+
+- Making `nvnTextureGetStorageSize` agree with the builder did not help either: the crash repeats register for
+  register (`reading address 0x30`, `f_7000c28198 = main+0xc28198`, `x1 0xffffffff`, `x2 0x200`, `x14 0x38`; only
+  `x19` differs between runs). So neither of the two things the 2026-11-13 fix left behind is the cause.
+- **What faults, named.** The report's `pc` is a bare guest address; `sdk+0x3726f0` is
+  `nn::os::SignalLightEvent(nn::os::LightEventType *)`. New `tools/symbolize.py` resolves a pasted report against
+  the dump's own symbol tables (the game's `main` is stripped, nnSdk and the subsdk are not) and places bare
+  addresses with the lift's `generated/layout.json`.
+- **The shape, from the lifted code** (read with the maintainer's standing permission; nothing of it here but
+  behaviour): `f_7000c28198` is a "get or make" accessor. It calls a lookup, and when that returns nothing it
+  runs the one-time construction `f_7000c29964` - which is the usual guard-acquire / construct / guard-release
+  triple, the release tail-calling into the SDK. That release signals a LightEvent that sits inside the object at
+  +0x48. The object pointer is sound (`0x618092260`, and the event at `0x6180922a8` is `x0` at the fault), but the
+  event's own internal pointer is **zero**, so the SDK reads `[0 + 0x30]`. The event was never initialized, or its
+  memory was zeroed.
+- Also worth keeping: after the failed lookup the accessor stores the result and dereferences it at +0x30
+  unconditionally, so a lookup that comes back empty is a crash either way. Same family as the 2026-11-12 crash
+  ("a second lookup silently returns nothing") and as the Pokedex one, which goes through the same delegate layer.
+- No host override touches LightEvent: all of it runs as lifted SDK code, so a split between our implementation
+  and the game's is ruled out.
+- **The next measurement, a bisection the earlier work already proved decisive:** `TOTK_SHADOW_RES=1024` - the
+  patch switched **on** but handing the game its own number - and then 2048. If the map crashes at 1024 the patch
+  mechanism is implicated rather than the size; if it is clean there and crashes somewhere above, the size is, and
+  the threshold says what runs out.
+
+## The map still crashes at x4, and what the log rules out (2026-11-14)
+
+- The own-memory fix below is in the build the maintainer tested and the log confirms it works:
+  `shadow map 4096x4096, 2 layer(s), fmt 0x34: 131072 KiB, our own memory` — one such texture, not several — and
+  `pass sizes per frame` carries `4096x4096+depth 2.8 passes 105 draws`. The map still crashes, so the 124 MiB
+  the image used to write past its reservation was real but not this crash.
+- What the crash is: `access violation reading address 0x30 in f_7000c28198 = main+0xc28198`, reached from
+  `main+0x107eedc / 0x107e4d4 / 0x1093e70`, with `main+0xb5decc / 0xb5d60c / 0xb5d074` further down the stack —
+  the same delegate/Lua layer the Pokedex crash goes through, and the same shape as the earlier shadow crashes: a
+  null object used at offset 0x30, i.e. something handed back nothing one step earlier. The frames before it are
+  the map's own UI archives loading (`ymap_common_frame`, `ymap_topmenu`).
+- The pool is as shipped, which the memory census confirms:
+  `import 0xa1 CPU_NO_ACCESS|GPU_CACHED|COMPRESSIBLE: 1 pools, 268.0 MiB`. Not exhausted by us any more.
+- **One inconsistency left by the 2026-11-13 fix, now fixed:** `nvnTextureBuilderGetStorageSize` under-reports an
+  enlarged shadow map, but `nvnTextureGetStorageSize` — the same question asked of the finished texture — still
+  answered with the real size, 32 times larger at 4096. Anything in the game that asks a texture how big it is
+  while managing that pool gets a number that contradicts what it reserved. Both now answer through
+  `storage_size_for_game`. Built, untested.
+- Still open if that is not it: the crash is size-dependent (x2 and x3 are reported fine), which argues for
+  bookkeeping rather than a script error, so the next thing to measure is what the game does with the shadow
+  map's size on that screen - or to find the fixed-size pool whose lookup returns nothing, as the 2026-11-12
+  entry did for the GPU memory pool.
+
+## Issue #60: the stutter when a ball is thrown, measured (2026-11-14)
+
+- The maintainer can trigger it at will, so the flight recorder answers it. `TOTK_FLIGHT=1 TOTK_FLIGHT_THUMBS=0
+  TOTK_FLIGHT_SPIKE_MS=40`, throw, then `tools/flight_view.py`.
+- What the dump says, on an RTX 5080 at a 60 fps limit: the quiet frames are 16.7 ms with **12.9 ms of them spent
+  waiting for the frame limit**, so there is a great deal of headroom. The throw frame is 42.2 ms with a 6 ms
+  texture upload in it; the ~20 frames after it run 33-48 ms **with nothing blocking the render thread at all** -
+  no shader translation, no pipeline build, no fence wait. Work per frame over a quiet one: passes 283 vs 255,
+  draws 1791 vs 1532, dispatches 26 vs 15.
+- So it is neither a first-time cost (nothing is translated or built, it will stutter every time) nor the GPU
+  being waited on. The time is in the frame's own work, and the flight recorder had no column for the one kind of
+  work that is not a wait: **replay**, the NVN-to-Vulkan recording, which dominated the worst frames of the GTX
+  1660 log in issue #60's neighbour reports. `flight_frame` now takes `replay_ns` from `perf_present` (it was
+  already computed there for the frame-time summary) and writes a `replay_ms` column; `flight_view.py` reports it
+  among the costs. Older dumps without the column still read.
+- Next, with the new column: if replay carries those 20 frames, the lead is the recording of ~260 extra draws and
+  11 extra dispatches, and `TOTK_COMPUTE_VRAM=0` is the first thing to try, since each dispatch's storage blocks
+  are copied to VRAM around it. If it does not, the time is the game's own CPU work and nothing here can help it.
+
+## Shadow map memory: the enlarged map must own it (2026-11-14)
+
+- Issue #61 (and the maintainer reproduced it): with Shadow quality at **x4** the game crashes when the map is
+  opened; x2, x3 and Original are fine. The same shape as the crashes the earlier shadow attempts kept producing,
+  and the cause is the half of the 2026-11-13 fix that was never followed through.
+- What that fix does is tell the game a patched shadow map is the 1024 map it replaces
+  (`storage_size_for_game`, `runtime/nvn_api_obj.c`): 4 MiB instead of 128 at 4096. The game then reserves 4 MiB
+  for it in its GPU pool and **hands the bytes after those to other textures**.
+- What was missed: the back end does not hold that texture as its own image after all. A texture whose storage is
+  in a CPU-invisible pool takes the alias path in `runtime/vk_texture.c` — `bind_pool_memory(c, e, img, L.size)`
+  with `L` the **real** layout. So at 4096 the image aliases 128 MiB of pool memory where the game reserved 4,
+  and writes 124 MiB over whatever the game put next in that pool. 20 MiB over at 2048, 60 at 3072. Nothing
+  notices until a screen uses enough of that pool at once, which the map does.
+- **The fix:** `nvn_tex_shadow_grown` (`runtime/nvn_api.h`, next to `nvn_gpu_only`) recognises the enlarged map
+  from its description alone, `storage_size_for_game` now asks it instead of repeating the test, and
+  `vk_texture.c` skips the alias path for it, so the image gets its own VMA allocation. The game's pool is then
+  genuinely untouched: it keeps the 4 MiB it reserved and nothing is written past them. The real bytes come out of
+  our own VRAM, 128 MiB at 4096 — which is what a bigger shadow map costs and where that cost belongs.
+- Built; **not tested in play yet.** The two things to watch: the map at x4, and that the NPC draw distance in
+  towns stays at the game's own ~30 m, since the game's streaming budget is still untouched.
+- Open with it: whether x4 is safe on cards with less VRAM. The reporter has an 8 GB RTX 4060 Laptop, and 128 MiB
+  of extra render target plus the map screen's own is not nothing there.
+
+## A barrier after every captured transform feedback draw (2026-11-14)
+
+- Issue #18, the AMD `VK_ERROR_DEVICE_LOST` during character creation. Two RDNA 3 reporters established that
+  `TOTK_XFB=0` avoids it (and ruins the skinned models), that AMD's Crash Analysis avoids it with the models
+  intact, and that `TOTK_SUBMIT_DEFER=0`, `TOTK_SUBMIT_SYNC=1`, `TOTK_BARRIER_TRACK=0` and `TOTK_XFB_MIRROR=0`
+  all still crash. A fault that disappears under serializing instrumentation is an ordering problem.
+- Reading `runtime/vk_xfb.c` with that in hand: the barrier after transform feedback is recorded **once per pass**,
+  when the game ends capture, never between the captured draws inside the pass. That is the one place in this path
+  with no ordering at all. `TOTK_XFB_SYNC=1` (`xfb_sync`, `vk_xfb_draw_end`) adds a full barrier after every
+  captured draw; off by default, slower when on.
+- Hypothesis, not a finding: nobody here has an AMD card to reproduce it on. Posted in #18 with what either
+  outcome means — no crash narrows the barrier down to the right stage/access pair, still crashing moves the
+  suspicion to the sizes and offsets handed to `vkCmdBindTransformFeedbackBuffersEXT`.
+
+## Launcher: two builds that could not recover, and a report that named the wrong thing (2026-11-14)
+
+- Issue #62: a player's toolchain download was interrupted after 3 of 31 packages. Every build afterwards failed
+  at the lifter with "ninja not found", with no way out through the launcher — and each attempt first redid the
+  three-minute RomFS merge. `plan()` in `tools/setup_build.py` asked for the toolchain step only when
+  `clang.exe` was missing, and clang is package 1 of 31. New `toolchain_msys2.missing(dest)` compares
+  `unpacked.json` against the pinned list and checks the binaries the build actually calls (ninja, lld, windres,
+  ar); `fetch` ends with the same check, and `fetch` itself already resumes where it stopped. `tools/lift.py`
+  no longer sends launcher builds to the MSYS2 install guide for a toolchain the launcher owns.
+- Issue #65: a player installed into `D:\Game\Pokémon_Violet\KarPur` on a Chinese Windows. `windres` opens the
+  files a `.rc` names through the system ANSI codepage, which has no room for `é`, so `icon.rc` naming the icon by
+  absolute path could not be read at all. It now names `icon.ico` by name and the `rc` rule carries a second,
+  relative `-I` for the build directory. Everything else on those command lines was already relative.
+- The same report also showed the launcher's error summary is useless where it matters most: it printed the last
+  four lines of output, and a build that stops at one file still compiles the rest, so the player sent "905
+  warnings generated | ninja: build stopped". `run()` now keeps the line that announces the failure and the two
+  after it (`FAIL_LINE`, progress lines skipped). Replayed against that player's log, the summary becomes
+  `FAILED: build/game/obj/icon.rc.o | ... can't open icon file ...: Invalid argument`.
+- New `tools/flight_view.py`, which `runtime/flight.c` has referred to since it was written without it existing:
+  it reads a dump's `frames.tsv` and prints the frames around the trigger, then what the slow frames spent that
+  the quiet ones did not, per blocked kind, and which work counts only appear in them. For issue #60 (a stutter
+  when a ball is thrown, which the maintainer can trigger at will): `TOTK_FLIGHT=1 TOTK_FLIGHT_THUMBS=0
+  TOTK_FLIGHT_SPIKE_MS=40`, throw a ball, then run the tool. Thumbnails off keeps the dump to numbers, so its
+  report can be pasted anywhere.
+
 ## Pokedex crash: narrowed to an unregistered handler, not fixed (2026-11-12)
 
 - Sharper reproduction from the maintainer, which changes the picture from the entry below: it is **not** about
