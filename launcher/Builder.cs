@@ -67,7 +67,11 @@ class Builder
         L($"=== {DateTime.Now:yyyy-MM-dd HH:mm:ss} launcher {Program.Version}{(repair ? " (repair)" : "")}");
 
         Status?.Invoke(repair ? "Restoring the project files" : "Unpacking the project files");
-        await Task.Run(() => UnpackPayload(root), cancel);
+        // After an update everything we unpack is dated now, even where the bytes are unchanged: the objects of the
+        // earlier build are newer than the files a release carries, and Ninja decides by date alone.
+        bool updated = BuiltWith(inp.Target) != Program.Version;
+        await Task.Run(() => UnpackPayload(root, updated), cancel);
+        if (updated) L("project files unpacked and dated now: this folder was last built by another launcher version");
         Percent?.Invoke(2);
         string python = await SetupPython(root, repair, L, cancel);
         Percent?.Invoke(SetupShare);
@@ -199,7 +203,7 @@ class Builder
 
     // The repository's files (and the prebuilt translator and hactool) into root; what the build made stays. Files the
     // player changed or deleted come back as they were released: this is also the source half of Repair.
-    static void UnpackPayload(string root)
+    static void UnpackPayload(string root, bool stampAll)
     {
         using var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
             ?? throw new InvalidOperationException("This launcher lacks its project files (payload.zip)");
@@ -211,8 +215,34 @@ class Builder
             string dest = Path.GetFullPath(Path.Combine(root, e.FullName));
             if (!dest.StartsWith(full, StringComparison.OrdinalIgnoreCase)) continue;
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            if (SameContent(dest, e)) { if (stampAll) Touch(dest); continue; }   // unchanged: at most a new date
             e.ExtractToFile(dest, overwrite: true);
+            // Stamp it now. ExtractToFile would give it the time the release was packed, which can be older than an
+            // object file an earlier build of this folder left behind - Ninja would then keep that object and the link
+            // fails on symbols the new source added (undefined res_shadow_* after updating to 0.3.7). What was just
+            // written has to look newer than everything built before it.
+            Touch(dest);
         }
+    }
+
+    // Now, as the file's date. A file a release carries keeps the date it had on the machine that packed it, which can
+    // be older than an object an earlier build of this folder left behind; Ninja would then keep that object, and the
+    // link fails on whatever the new source added (undefined res_shadow_* after updating to 0.3.7).
+    static void Touch(string path)
+    {
+        // A failure here must stop the build: silently keeping the archive's date can reuse stale objects again.
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+    }
+
+    // True when the file already holds exactly these bytes, so unpacking it again would change nothing.
+    static bool SameContent(string path, ZipArchiveEntry e)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Length != e.Length) return false;
+        using var s = e.Open();
+        using var m = new MemoryStream((int)e.Length);
+        s.CopyTo(m);
+        return m.GetBuffer().AsSpan(0, (int)m.Length).SequenceEqual(File.ReadAllBytes(path));
     }
 
     record Pin(string url, long size, string sha256);

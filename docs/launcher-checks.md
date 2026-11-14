@@ -13,10 +13,11 @@ Wichtigste Regel aus allem, was bisher schiefgegangen ist:
 ## 1. Automatisch prüfen
 
 ```bash
-cd C:\KarPur\repo; .venv\Scripts\python tools\check_launcher.py
+cd C:\KarPur\repo; .venv\Scripts\python tools\check_launcher.py --payload
 ```
 
-Fünf Prüfungen, alle statisch, ohne etwas zu bauen. Jede steht für einen Fehler, der wirklich passiert ist:
+Sechs statische Prüfungen und mit `--payload` ein zusätzlicher Ausführungstest (benötigt das .NET-10-SDK).
+Jede steht für einen Fehler, der wirklich passiert ist:
 
 | Prüfung | Was sie prüft | Warum |
 |---|---|---|
@@ -26,6 +27,8 @@ Fünf Prüfungen, alle statisch, ohne etwas zu bauen. Jede steht für einen Fehl
 | `toolchain` | Die Programme, die der Build aufruft, sind die, nach denen `toolchain_msys2.TOOLS` nach dem Entpacken sucht. | Issue #62: ein abgebrochener Toolchain-Download wurde als fertig verbucht, weil nur `clang.exe` geprüft wurde — und clang ist Paket 1 von 31. Jeder weitere Build scheiterte danach mit „ninja not found", ohne Ausweg. |
 | `payload` | Die Dateien, die ein Build auf dem PC des Spielers braucht, werden von `tools/make_launcher.py` auch mitgeliefert (sind also nicht von git ignoriert). | Eine ignorierte Datei fehlt im Release und niemand merkt es beim Entwickeln, weil sie lokal ja da ist. |
 | `project` | Die Bauoptionen des Launchers: `SelfContained` an, `InvariantGlobalization` **aus**. | 14.11.: mit `InvariantGlobalization` an wirft WinForms eine unbehandelte Ausnahme, sobald man die Tastaturbelegung wechselt, während ein Textfeld den Fokus hat — es fragt dann das System nach der Kultur der Belegung, und die gibt es im invarianten Modus nicht. 0x0407 ist Deutsch. |
+
+| `payload_dates` | Der echte Entpacker mit einem Testarchiv: neue und geänderte Quellen sind neuer als alte Objektdateien; nach einem Versionswechsel gilt das auch für identische Quellen. Ein weiterer Build derselben Version behält die Zeitstempel. | Issue #66: das Archiv lieferte alte Zeitstempel, Ninja behielt alte Objektdateien und der Linker fand die neuen `res_shadow_*`-Funktionen nicht. |
 
 Schlägt eine Prüfung fehl, nennt sie die Fundstellen. **Kein Release mit einer fehlgeschlagenen Prüfung.**
 

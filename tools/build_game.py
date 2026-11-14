@@ -859,7 +859,7 @@ def main():
     code, dt, peak_one, _ = run_measured(base + [flag_path(exe)], env)
     print(f'link: {dt:.1f} s, peak {mib(peak_one)}')
     if code:
-        print(f'build_game: link failed, {flag_path(exe)} is the old one (a running karpur.exe from this dir locks it)',
+        print(f'build_game: link failed for {flag_path(exe)}; see the linker errors above',
               file=sys.stderr)
         sys.exit(code)
     if args.make_runtime_lib:

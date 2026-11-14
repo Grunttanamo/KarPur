@@ -20,6 +20,7 @@ has the story of each):
 It prints one line per check and exits non-zero if any failed. Reads this repository only, no game data.
 """
 
+import argparse
 import re
 import subprocess
 import sys
@@ -103,6 +104,10 @@ def left_out(paths):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument('--payload', action='store_true',
+                        help='also build and test the actual payload unpacker (.NET 10 SDK required)')
+    args = parser.parse_args()
     bad = []
 
     def check(name, problems, detail=''):
@@ -161,6 +166,11 @@ def main():
     if not re.search(r'<SelfContained>\s*true\s*</SelfContained>', proj):
         wrong.append('SelfContained is not true: the player would need the .NET runtime installed')
     check('project', wrong, 'the build properties of the launcher')
+
+    if args.payload:
+        result = subprocess.run([sys.executable, str(ROOT / 'tools' / 'check_launcher_payload.py')], cwd=ROOT)
+        check('payload_dates', [] if result.returncode == 0 else ['payload unpacking regression failed'],
+              'real launcher code with synthetic archive and cached build outputs (issue #66)')
 
     print()
     if bad:

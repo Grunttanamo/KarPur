@@ -1,5 +1,26 @@
 # Progress
 
+## Launcher 0.3.8: stale objects after an update (issue #66, 2026-11-14)
+
+- The report links updated runtime consumers against a stale `resolution.o`: all four missing `res_shadow_*`
+  functions exist in the current `runtime/resolution.c`, but Ninja reports no work. The 0.3.7 unpacker restores
+  ZIP timestamps, which can predate objects from an earlier build. The object manifest verifies object integrity,
+  not whether an object matches current source contents, so it cannot repair this state.
+- Completed the existing 0.3.8 work in `launcher/Builder.cs`: changed/new payload files get the current date;
+  identical files keep their date for incremental builds, except on a launcher-version change, when every payload
+  file is touched to recover already-installed sources with stale objects. Timestamp failures now propagate instead
+  of silently continuing. The version marker is recorded only after a successful build.
+- Added `tools/check_launcher_payload.py`, which builds the actual launcher with a synthetic embedded ZIP in an
+  isolated temporary build directory, invokes its real unpacker without opening a window, and checks old ZIP dates
+  against newer cached objects, equal-length edits, unchanged sources after a version change, incremental repeats,
+  restored files, preservation of build outputs and rejection of a traversal entry. No game files are used.
+  Run it through `tools/check_launcher.py --payload` before a release; the German checklist includes it.
+- Removed the unconditional suggestion that a running game caused every link failure; the diagnostic now directs
+  the user to the actual linker errors. The report's missing symbols do not establish a file lock.
+- All seven launcher checks, including the nine unpacker assertions, pass. Launcher 0.3.8 builds successfully.
+  The maintainer tested the executable against an existing installation and confirmed the update works. The empty
+  installation build was already checked for 0.3.6 (below); this change addresses updates to existing installations.
+
 ## A build in its own folder, and the sixth check (2026-11-14)
 
 - The maintainer built 0.3.6 into an empty folder from the release executable alone. It ran through to `DONE`:
