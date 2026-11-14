@@ -1,5 +1,31 @@
 # Progress
 
+## A build in its own folder, and the sixth check (2026-11-14)
+
+- The maintainer built 0.3.6 into an empty folder from the release executable alone. It ran through to `DONE`:
+  RomFS and DLC, the menu list, the patch table, **the icon step and `RC build/game/icon.rc`** (which is the issue
+  #65 change in a real build), the lift (404 files, 0 errors), 523 objects with only the known warnings, the
+  selftest with 0 failures, and the shaders.
+- It took two runs, and together they cover the whole path. The first downloaded and unpacked the toolchain
+  (**31 of 31 packages**), extracted the game and the fonts, and was interrupted during the RomFS copy; the second
+  planned `check,romfs,dlc,...` **without** toolchain, extract and fonts and ran to the end. That second plan is
+  the check of this release in its risky direction: `missing()` recognised the complete toolchain, so the step was
+  left out. Had it been wrong the other way, every build would download the toolchain again.
+- What that leaves untested is only an interruption **during** the toolchain download - the issue #62 state
+  itself, which is covered by the five states `missing()` was tested against in a temporary folder.
+- The shader step is worth keeping: the census read 23589 packs and prepared **35897 variants, 0 translations
+  failed**, and the pipeline prebuild then met a driver crash (`0xc0000374`) twice. The recovery did its job - it
+  restarted, narrowed the crash down to the single variant `7134bd0791007073`, set that one aside in
+  shader-warm-skip.bin and finished the other 35896. Nothing to fix; the mechanism is sound and now seen working.
+- **A new launcher bug the test found,** in 0.3.6 as released: clicking into the build log and switching the
+  keyboard layout throws `CultureNotFoundException: Only the invariant culture is supported in
+  globalization-invariant mode ... 1031 (0x0407) is an invalid culture identifier`, from
+  `InputLanguage.get_LanguageTag` by way of `TextBox.WndProc`. WinForms asks the system for the culture of the new
+  layout on every WM_INPUTLANGCHANGE, and `<InvariantGlobalization>true</InvariantGlobalization>` makes that throw.
+  It hits anyone who switches layout over a text box, which for a German audience is a lot of people. The property
+  is now false; Windows supplies ICU itself, so the executable is the same 55.8 MiB. `tools/check_launcher.py`
+  gained a sixth check, `project`, for the launcher's build properties, and refuses the old setting.
+
 ## Checks before a launcher release, and what they already found (2026-11-14)
 
 - Three bugs in two days all sat on the launcher's own path, where a mistake reaches every player at once and

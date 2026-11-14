@@ -25,6 +25,7 @@ Fünf Prüfungen, alle statisch, ohne etwas zu bauen. Jede steht für einen Fehl
 | `tools` | Jedes Skript, das der Build startet, existiert und lässt sich im isolierten Modus importieren (`python -I`). | Issue #45: ein Build lief 75 Minuten und brach dann mit `No module named 'romfs_index'` ab, weil Python den Skriptordner nicht auf den Suchpfad legt, wenn `PYTHONSAFEPATH` gesetzt ist. |
 | `toolchain` | Die Programme, die der Build aufruft, sind die, nach denen `toolchain_msys2.TOOLS` nach dem Entpacken sucht. | Issue #62: ein abgebrochener Toolchain-Download wurde als fertig verbucht, weil nur `clang.exe` geprüft wurde — und clang ist Paket 1 von 31. Jeder weitere Build scheiterte danach mit „ninja not found", ohne Ausweg. |
 | `payload` | Die Dateien, die ein Build auf dem PC des Spielers braucht, werden von `tools/make_launcher.py` auch mitgeliefert (sind also nicht von git ignoriert). | Eine ignorierte Datei fehlt im Release und niemand merkt es beim Entwickeln, weil sie lokal ja da ist. |
+| `project` | Die Bauoptionen des Launchers: `SelfContained` an, `InvariantGlobalization` **aus**. | 14.11.: mit `InvariantGlobalization` an wirft WinForms eine unbehandelte Ausnahme, sobald man die Tastaturbelegung wechselt, während ein Textfeld den Fokus hat — es fragt dann das System nach der Kultur der Belegung, und die gibt es im invarianten Modus nicht. 0x0407 ist Deutsch. |
 
 Schlägt eine Prüfung fehl, nennt sie die Fundstellen. **Kein Release mit einer fehlgeschlagenen Prüfung.**
 

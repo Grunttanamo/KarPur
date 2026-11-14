@@ -15,9 +15,13 @@
     <PublishSingleFile>true</PublishSingleFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Not invariant: WinForms asks the system for the culture of a keyboard layout whenever the input language
+         changes while a text box has focus (InputLanguage.LanguageTag). In invariant mode that throws, and the
+         player gets an unhandled exception dialog just for switching layout - 0x0407 is German. Windows supplies
+         ICU itself, so nothing is bundled for this. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>0.3.6</Version>
+    <Version>0.3.7</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- WFO1000: designer serialization of control properties; the launcher builds its controls in code -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>

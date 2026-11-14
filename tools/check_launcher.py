@@ -153,6 +153,15 @@ def main():
                             'recomp/gen.py', 'runtime/cfg.c', 'docs/launcher-checks.md']
     check('payload', left_out(need), f'{len(need)} files the launcher needs on the player\'s PC')
 
+    # Build properties that are wrong for a WinForms program the player types into.
+    proj = (LAUNCHER / 'KarPurLauncher.csproj').read_text(encoding='utf-8')
+    wrong = []
+    if re.search(r'<InvariantGlobalization>\s*true\s*</InvariantGlobalization>', proj):
+        wrong.append('InvariantGlobalization is true: switching keyboard layout over a text box throws')
+    if not re.search(r'<SelfContained>\s*true\s*</SelfContained>', proj):
+        wrong.append('SelfContained is not true: the player would need the .NET runtime installed')
+    check('project', wrong, 'the build properties of the launcher')
+
     print()
     if bad:
         sys.exit(f'{len(bad)} check(s) failed: {", ".join(bad)}')
