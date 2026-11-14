@@ -1080,7 +1080,8 @@ void rt_spin_gate(Cpu *c, uint64_t head) {
     if (g_spin_on < 0) {
         const char *e = cfg_get("TOTK_SPIN_HANDOFF_US");
         g_spin_handoff_ns = (uint64_t)(e && *e ? atoll(e) : 50) * 1000;
-        g_spin_on = !(cfg_get("TOTK_SPIN") && !cfg_bool("TOTK_SPIN"));
+        g_spin_on = rt_knob("SPIN", "1");   // rt_knob, not cfg_bool: no row in the settings table is needed, and an
+                                             // empty value in karpur.ini is the default rather than a fatal error
     }
     t->sp_n++;
     t->sp_site = head;

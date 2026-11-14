@@ -16,6 +16,8 @@ This repository is public. Nothing from the game may enter it.
 - Everything extracted or generated goes under `game/`, `build/` or `generated/`, all ignored.
 - Every file the code generator emits carries the marker `GENERATED_MARKER` from `tools/check_content.py`.
 - Run `python tools/check_content.py --staged` before every commit. CI runs the same check.
+- Before a launcher release, run `python tools/check_launcher.py` and work through `docs/launcher-checks.md`.
+  Every check there stands for a bug a player found instead of us; a failing one is not released.
 
 ## Reusing code
 
@@ -33,4 +35,4 @@ This repository is public. Nothing from the game may enter it.
 
 ## Writing
 
-Code, comments, commit messages and `CLAUDE.md` are in English. `README.md`, `docs/roadmap.md` and `docs/progress.md` are in English (the German log up to 2026-11-08 stays in `docs/progress-archive-de.md`). The guides the maintainer reads (`docs/setup-windows.md`, `docs/launcher.md`) are in German. Commit messages are plain sentences without type prefixes.
+Code, comments, commit messages and `CLAUDE.md` are in English. `README.md`, `docs/roadmap.md` and `docs/progress.md` are in English (the German log up to 2026-11-08 stays in `docs/progress-archive-de.md`). The guides the maintainer reads (`docs/setup-windows.md`, `docs/launcher.md`, `docs/launcher-checks.md`) are in German. Commit messages are plain sentences without type prefixes.

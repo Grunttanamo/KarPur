@@ -49,7 +49,7 @@ static void VKAPI_PTR on_allocate(VmaAllocator a, uint32_t type, VkDeviceMemory 
 
 const VmaDeviceMemoryCallbacks *vk_headroom_callbacks(void) {
     static const VmaDeviceMemoryCallbacks cb = {.pfnAllocate = on_allocate};
-    H.on = !cfg_get("TOTK_VRAM_HEADROOM") || cfg_bool("TOTK_VRAM_HEADROOM");
+    H.on = rt_knob("VRAM_HEADROOM", "1");   // rt_knob: see the note in kernel.c rt_spin_gate
     return H.on ? &cb : NULL;
 }
 
