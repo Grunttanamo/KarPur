@@ -264,7 +264,7 @@ void perf_present(uint64_t frame) {
     if (__atomic_load_n(&overlay, __ATOMIC_RELAXED))   // the overlay's only cost while it is off: this branch
         perfmon_frame(now, d, frame_ns, rep, __atomic_load_n(&counts[PERF_CNT_TEX_UP], __ATOMIC_RELAXED));
     kern_core_diag_frame(frame, d);
-    if (flight_on) flight_frame(frame, now, d, frame_ns, counts);
+    if (flight_on) flight_frame(frame, now, d, frame_ns, rep, counts);
     if (!(rt_trace & RT_TRACE_PERF)) {
         memset(frame_ns, 0, sizeof frame_ns);
         last = now;

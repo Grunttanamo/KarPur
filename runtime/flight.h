@@ -10,9 +10,10 @@ extern int flight_on;   // TOTK_FLIGHT=1, set once by flight_init before the fir
 
 void flight_init(void);   // prof_start calls it
 // perf_present, once per present on the render thread: the interval since the previous present, the render thread's
-// blocked time per PERF_* kind in this frame, and the running PERF_CNT_* totals.
+// blocked time per PERF_* kind in this frame, the time spent replaying NVN commands into Vulkan (not a blocked kind:
+// it is work, and the one cost a frame can be made of while waiting for nothing), and the running PERF_CNT_* totals.
 void flight_frame(uint64_t frame, uint64_t now_ns, uint64_t interval_ns, const uint64_t blocked_ns[],
-                  const volatile int64_t counts[]);
+                  uint64_t replay_ns, const volatile int64_t counts[]);
 
 // gfx_present.c: the present thread blits every presented frame into a host-visible ring of n thumbnails.
 void vk_thumbs_enable(int n);            // before the first present; n slots of FLIGHT_THUMB_W x FLIGHT_THUMB_H
