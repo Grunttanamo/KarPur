@@ -135,6 +135,27 @@ def unpack(archive, dest):
         t.extractall(dest, members=members, filter='data')
 
 
+# The binaries the build itself calls, beyond clang: a toolchain step that was stopped part way through leaves the
+# packages it did get unpacked, and clang is the first of the 31, so checking clang alone declared a toolchain of three
+# packages complete. The step was then never planned again and every later build failed at the lifter with
+# "ninja not found", with no way out through the launcher (issue #62).
+# tools/check_launcher.py checks this against the executables the build actually names, so the two cannot drift apart.
+# ld.lld is reached through clang's -fuse-ld=lld, so it is named nowhere and needed by every link.
+TOOLS = ('clang.exe', 'ninja.exe', 'ld.lld.exe', 'windres.exe')
+
+
+def missing(dest):
+    """What a complete toolchain under dest lacks: unpacked packages and binaries, by name; empty when it is complete."""
+    dest = Path(dest)
+    done_file = dest / 'unpacked.json'
+    try:
+        done = set(json.loads(done_file.read_text(encoding='utf-8')))
+    except (OSError, ValueError):
+        done = set()
+    pins = {p['file'] for p in json.loads(PINS.read_text(encoding='utf-8'))['packages']}
+    return sorted(pins - done) + [t for t in TOOLS if not (dest / 'ucrt64' / 'bin' / t).is_file()]
+
+
 def fetch(dest, log=print):
     """Downloads and unpacks every pinned package into dest; returns dest/ucrt64 (KARPUR_UCRT)."""
     dest = Path(dest)
@@ -158,8 +179,9 @@ def fetch(dest, log=print):
         have += p['size']
         log(f'PERCENT toolchain {100 * have // total}')
     ucrt = dest / 'ucrt64'
-    if not (ucrt / 'bin' / 'clang.exe').is_file():
-        raise RuntimeError(f'{ucrt / "bin" / "clang.exe"} is missing after unpacking')
+    left = missing(dest)
+    if left:
+        raise RuntimeError(f'the toolchain under {dest} is incomplete after unpacking: {", ".join(left[:4])}')
     return ucrt
 
 

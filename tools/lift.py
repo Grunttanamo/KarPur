@@ -44,6 +44,11 @@ def find_tool(name, given):
         return MSYS_BIN / f'{name}.exe'
     found = shutil.which(name)
     if not found:
+        # A launcher build has its own toolchain and never asks the player to install one: that it is incomplete
+        # here means the toolchain step was stopped part way through (issue #62).
+        if os.environ.get('KARPUR_UCRT'):
+            sys.exit(f'error: {name} is missing from the toolchain. Press Build again: the launcher downloads the '
+                     'packages the stopped run did not get.')
         sys.exit(f'error: {name} not found. Install it with MSYS2 (docs/setup-windows.md, step 8).')
     return Path(found)
 

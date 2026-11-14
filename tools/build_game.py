@@ -348,7 +348,9 @@ def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=
         '  description = CC $in',
         '',
         'rule rc',
-        f'  command = {cmd_arg(WINDRES.as_posix())} -I {cmd_path(RUNTIME)} -O coff $in -o $out',
+        # Two include paths, both relative: windres opens the files a .rc names through the system ANSI codepage,
+        # so it cannot open a path holding a character that codepage has no room for (icon.rc below, issue #65).
+        f'  command = {cmd_arg(WINDRES.as_posix())} -I {cmd_path(RUNTIME)} -I {cmd_path(out)} -O coff $in -o $out',
         '  description = RC $in',
         '',
         'rule link',
@@ -385,7 +387,9 @@ def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=
     icon = out / 'icon.ico'   # tools/game_icon.py: the player's own game icon (never in the repository)
     if WIN and icon.is_file() and not make_lib:
         rc = out / 'icon.rc'
-        write_if_changed(rc, f'1 ICON "{icon.as_posix()}"\n')
+        # The name alone, found through the rule's -I: an absolute path here is opened in the system ANSI codepage and
+        # fails outright when the install folder holds a character that codepage lacks (issue #65).
+        write_if_changed(rc, f'1 ICON "{icon.name}"\n')
         o = out / 'obj' / 'icon.rc.o'   # every object under obj/ (the object hash check names them relative to it)
         lines.append(f'build {ninja_path(o)}: rc {ninja_path(rc)} | {ninja_path(icon)}')
         rt.append(o)

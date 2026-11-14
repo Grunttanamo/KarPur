@@ -92,24 +92,38 @@ def check(a):
         f'[keys]\nprod = {q(a.keys)}\n', encoding='utf-8')
 
 
+# A line that names the reason a step failed, and the two lines after it: what the compiler or the resource compiler
+# says about it comes after the line that announces the failure. The last lines of the output are not it - a build that
+# stops at one file still compiles the files that do not depend on it, so its last lines are warnings from elsewhere and
+# the report the player sends says nothing about the cause (issue #65).
+PROGRESS_LINE = re.compile(r'^\[\d+/\d+\]')   # a compiler progress line says nothing about the failure
+FAIL_LINE = re.compile(r"^(FAILED|ninja: error)[: ]|\berror:|fatal error|can't open", re.IGNORECASE)
+
+
 def run(step, cmd, env, progress=None):
     """cmd with its output in the log; progress(line) may return a percentage."""
     with open(LOG, 'a', encoding='utf-8') as log:
         log.write(f'\n=== {step}: {" ".join(str(c) for c in cmd)}\n')
         p = subprocess.Popen([str(c) for c in cmd], cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, encoding='utf-8', errors='replace', bufsize=1)
-        tail = []
+        tail, why, after = [], [], 0
         for line in p.stdout:
             line = line.rstrip()
             log.write(line + '\n')
             out(f'LOG {line}')
             tail = (tail + [line])[-12:]
+            if FAIL_LINE.search(line):
+                after = 3
+            if after and line and not PROGRESS_LINE.match(line) and len(why) < 6:
+                why.append(line[:300])
+            after = max(after - 1, 0)
             pct = progress(line) if progress else None
             if pct is not None:
                 out(f'PERCENT {pct}')
         code = p.wait()
     if code:
-        raise StepError(f'{cmd[1] if len(cmd) > 1 else cmd[0]} ended with exit code {code}: ' + ' | '.join(tail[-4:]))
+        raise StepError(f'{cmd[1] if len(cmd) > 1 else cmd[0]} ended with exit code {code}: '
+                        + ' | '.join(why or tail[-4:]))
 
 
 def menu():
@@ -253,8 +267,8 @@ def plan(state):
         work.update(['lift', 'fps'])   # build_game.py compiles from generated/: an older install's cleanup removed it
     if 'selftest' not in done:
         work.add('selftest')
-    if work & {'lift', 'build'} and not (MSYS / 'ucrt64' / 'bin' / 'clang.exe').is_file():
-        work.add('toolchain')
+    if work & {'lift', 'build'} and toolchain_msys2.missing(MSYS):
+        work.add('toolchain')   # also when a stopped run left it part way through: fetch() carries on where it stopped
     return ['check'] + [s for s in STEPS if s in work and s not in ('check', 'cleanup')] + ['cleanup']
 
 
