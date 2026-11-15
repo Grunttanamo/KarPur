@@ -47,6 +47,7 @@ def main():
     target = DIST / 'KarPur-Launcher.exe'
     target.write_bytes(exe.read_bytes())
     print(f'{target}: {target.stat().st_size / 2**20:.1f} MiB')
+    (DIST / 'recomplauncher.json').write_bytes((ROOT / 'recomplauncher.json').read_bytes())   # next to the exe, for RecompLauncher
 
 
 if __name__ == '__main__':
