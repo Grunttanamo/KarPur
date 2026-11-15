@@ -19,9 +19,58 @@ static class Program
         return null;
     }
 
-    [STAThread]
-    static void Main(string[] args)
+    // --prepare --game <base.xci> --update <update.nsp> --keys <prod.keys> [--dlc <dlc.nsp>] [--firmware <dir>] [--target <dir>]:
+    // the Setup tab's Build without the window (the same Builder.Run), for RecompLauncher. Prints "progress 0.4 text"
+    // lines, exits 0 when the game is built and 1 with one line on stderr when it is not. --target defaults to the
+    // folder of this exe; the game is made in <target>\KarPur, as in the Setup tab.
+    static int Prepare(string[] args)
     {
+        string? Opt(string name)
+        {
+            int i = Array.IndexOf(args, name);
+            return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+        }
+        static int Fail(string message)
+        {
+            Console.Error.WriteLine(message.Replace("\r", " ").Replace("\n", " "));
+            return 1;
+        }
+        string target = Opt("--target") ?? Path.GetDirectoryName(Environment.ProcessPath) ?? "";
+        if (target != "") target = Path.TrimEndingDirectorySeparator(target);
+        var inp = new Inputs(Opt("--game") ?? "", Opt("--update") ?? "", Opt("--dlc") ?? "", Opt("--keys") ?? "", target,
+                             Opt("--firmware") ?? "");
+        if (!File.Exists(inp.Base)) return Fail("The base game (.xci) given with --game was not found.");
+        if (!File.Exists(inp.Update)) return Fail("The update (.nsp) given with --update was not found.");
+        if (!File.Exists(inp.Keys)) return Fail("The prod.keys given with --keys was not found.");
+        if (inp.Dlc != "" && !File.Exists(inp.Dlc)) return Fail("The DLC file given with --dlc was not found.");
+        if (inp.Firmware != "" && !Directory.Exists(inp.Firmware)) return Fail("The firmware folder given with --firmware was not found.");
+        if (inp.Target == "") return Fail("No target folder.");
+        if (inp.Target.Contains(' ')) return Fail("The target folder must not contain spaces (for example C:\\Games).");
+
+        string text = "Starting";
+        int percent = 0;
+        void Report() =>
+            Console.WriteLine($"progress {(percent / 100.0).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)} {text}");
+        var b = new Builder
+        {
+            Status = s => { text = s; Report(); },
+            Percent = p => { p = Math.Clamp(p, 0, 100); if (p == percent) return; percent = p; Report(); },
+        };
+        string? error;
+        try { error = b.Run(inp, false, CancellationToken.None).GetAwaiter().GetResult(); }
+        catch (Exception e) { error = e.Message; }
+        if (error != null) return Fail(error);
+        Builder.NoteBuilt(inp.Target);
+        percent = 100;
+        text = "Ready";
+        Report();
+        return 0;
+    }
+
+    [STAThread]
+    static int Main(string[] args)
+    {
+        if (args.Contains("--prepare")) return Prepare(args);
         Updater.CleanUpOld();
         ApplicationConfiguration.Initialize();
         PreviewColour = args.FirstOrDefault(a => a.StartsWith("--colour="))?[9..];
@@ -41,5 +90,6 @@ static class Program
                 form.Close();
             };
         Application.Run(form);
+        return 0;
     }
 }
