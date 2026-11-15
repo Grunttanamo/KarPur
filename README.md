@@ -13,6 +13,13 @@
 </div>
 
 > [!IMPORTANT]
+> **A few quick fixes if you get some problems**
+> 1. Activate "Compatibily Mode" in the Settings Tab
+> 2. Paste this line in karpur.ini -> hot_cool = 0
+> 3. Activate Resizable Bar on your System - this will mostly fix the most Problems
+> Try one or all at the same and see what quick fix makes a different
+
+> [!IMPORTANT]
 > **This repository contains no game files and never will.** You need your own legally obtained copy of the game and the keys of your own console. Instructions for obtaining them will not be provided.
 >
 > Everything is built from your files, on your PC, for your own use. Do not share it.
