@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>KarPur-Launcher-Linux</AssemblyName>
+    <RootNamespace>KarPurLinux</RootNamespace>
+    <Version>0.3.8</Version>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.23" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.23" />
+    <AvaloniaResource Include="../launcher/assets/banner-*.jpg" Link="Assets/%(Filename)%(Extension)" />
+    <AvaloniaResource Include="../launcher/assets/icon-*.png" Link="Assets/%(Filename)%(Extension)" />
+    <AvaloniaResource Include="../launcher/assets/logo-*.png" Link="Assets/%(Filename)%(Extension)" />
+    <Compile Include="../launcher/Ini.cs" Link="Ini.cs" />
+  </ItemGroup>
+</Project>

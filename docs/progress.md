@@ -1,5 +1,17 @@
 # Progress
 
+## Experimental Linux launcher 0.3.8 (2026-11-15)
+
+- The separate `launcher-linux/` Avalonia frontend and `tools/make_appimage.py` provide an experimental Linux
+  AppImage. Downloaded toolchains and build outputs remain ignored; the AppImage is distributed as a release asset.
+  The Windows launcher and its release packaging remain in `launcher/` and `tools/make_launcher.py`.
+- The Linux Home page names missing scenery and performance problems and links to Issues and pull requests for
+  Linux/Vulkan contributors. The ineffective `MEMORY=import` and crash-inducing compute shader Settings options are
+  removed; old saved values no longer affect game launches.
+- The visible Linux version and AppImage filename are 0.3.8, matching the Windows release. Internal pin revision
+  0.3.8.11 replaces earlier installed 0.3.8.9/.10 Deck test launchers. Platform-specific compiler and runtime paths
+  are gated on Linux; Windows retains its embedded UI resources.
+
 ## Launcher 0.3.8: stale objects after an update (issue #66, 2026-11-14)
 
 - The report links updated runtime consumers against a stale `resolution.o`: all four missing `res_shadow_*`

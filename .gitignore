@@ -60,6 +60,8 @@ desktop.ini
 /dist/
 /launcher/bin/
 /launcher/obj/
+/launcher-linux/bin/
+/launcher-linux/obj/
 
 # Launcher's own mod list (written next to the installed game, not source)
 /mods.json

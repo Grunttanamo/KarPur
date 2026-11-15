@@ -31,3 +31,17 @@ The full license texts are in [licenses/](licenses/).
 - [LAS Recomp](https://github.com/peiikai/LASRecomp): original lifter and differential tests (MIT)
 - [Ryujinx](https://github.com/Ryujinx/Ryujinx): Maxwell shader translator (MIT)
 - [hactool](https://github.com/SciresM/hactool): NCA/NSP extraction (ISC)
+# Separate Linux launcher dependencies
+
+The optional `launcher-linux` AppImage uses Avalonia UI 11.3.23 (MIT), the .NET 10 runtime (MIT),
+SDL 3.4.20 (zlib) and Python Build Standalone CPython 3.14.10 (PSF-2.0 and bundled component licences).
+The Linux tool prefix includes Vulkan-Headers 1.4.335 (Apache-2.0/MIT).
+Its Python environment includes cryptography 46.0.3 (Apache-2.0/BSD), lz4 4.4.5 (BSD), NumPy 2.3.5 (BSD)
+and their dependencies. Their installed metadata and licences are included in the payload.
+The AppImage runtime is Type 2 release 20251108 (MIT), distributed as the upstream unmodified runtime.
+Its sources and licence are available at https://github.com/AppImage/type2-runtime/tree/20251108.
+The Steam Deck build payload additionally includes Zig 0.15.2 (MIT; bundled Clang/LLVM and libc++ components
+retain their upstream notices), Ninja 1.11.1 (Apache-2.0), Opus (BSD), libvpx (BSD), Zstandard (BSD) and the Vulkan
+loader development library (Apache-2.0), and Clang compiler-rt builtins (Apache-2.0 with LLVM exception). Their
+distribution copyright notices are in
+`toolchain/deps-linux/licenses/`; Zig's full notices remain in `toolchain/zig/`.

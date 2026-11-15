@@ -34,6 +34,7 @@ static int pad_east_a;               // ... and labels its east face button A (N
 static int pad_layout = -1;          // PAD_LAYOUT_* in effect for the open gamepad, -1 to pick again; live (cfg_version)
 static unsigned pad_layout_seen;
 static volatile int32_t pad_layout_shown = -1;   // pad_layout for the menu (any thread), -1 without a gamepad
+static volatile int32_t deck_paddle_available;
 static SDL_JoystickID sensor_pad;    // the gamepad whose sensors the motion thread set up, 0 none
 static int sensor_ok;                // ... and it has both sensors, enabled
 static int motion_thread;            // 0 not started, 1 running, -1 off (TOTK_MOTION=0, no SDL)
@@ -49,6 +50,17 @@ static const SDL_GamepadButton pad_sdl[PAD_COUNT] = {
     [PAD_LPADDLE1] = SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, [PAD_RPADDLE1] = SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,
     [PAD_LPADDLE2] = SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, [PAD_RPADDLE2] = SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2,
 };
+
+int input_deck_mode(void) {
+#if defined(__linux__)
+    const char *mode = getenv("KARPUR_DECK_CONTROLS");
+    return mode && !strcmp(mode, "1");
+#else
+    return 0;
+#endif
+}
+
+int input_deck_paddle_available(void) { return __atomic_load_n(&deck_paddle_available, __ATOMIC_RELAXED); }
 
 // TOTK_INPUT_SCRIPT=<file>: lines "<frame> <button> [hold]" or "<frame> LSTICK|RSTICK <x> <y> [hold]", ORed into the real input.
 // <frame> and its hold are 60 Hz ticks of game time since the first present (frame_step_ticks: presents at 60 fps), so
@@ -304,9 +316,16 @@ static void scan_pads(void) {
     }
     int n = 0;
     SDL_JoystickID *ids = SDL_GetGamepads(&n);
+    if (input_deck_mode())
+        for (int i = 0; ids && i < n && !pad; i++) {
+            const char *name = SDL_GetGamepadNameForID(ids[i]);
+            if (name && strstr(name, "Steam Deck")) pad = SDL_OpenGamepad(ids[i]);
+        }
     for (int i = 0; ids && i < n && !pad; i++) pad = SDL_OpenGamepad(ids[i]);
     SDL_free(ids);
-    if (!pad) return;
+    if (!pad) { plat_xchg32(&deck_paddle_available, 0); return; }
+    plat_xchg32(&deck_paddle_available, input_deck_mode() &&
+                SDL_GamepadHasButton(pad, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1));
     pad_rumble = SDL_GetBooleanProperty(SDL_GetGamepadProperties(pad), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
     pad_east_a = SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_EAST) == SDL_GAMEPAD_BUTTON_LABEL_A;
     for (int i = 0; i < 4; i++) {
@@ -325,6 +344,11 @@ static void scan_pads(void) {
     int motion = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO) && SDL_GamepadHasSensor(pad, SDL_SENSOR_ACCEL);
     rt_log("input: gamepad \"%s\" (%s, %s, east button %s)", SDL_GetGamepadName(pad), pad_rumble ? "rumble" : "no rumble",
            motion ? "gyro and accelerometer" : "no motion sensors", pad_east_a ? "labelled A" : "not labelled A");
+    if (input_deck_mode())
+        rt_log("input: Deck mode: L4=%s R4=%s R5=%s; duplicate keyboard/mouse gameplay input ignored",
+               SDL_GamepadHasButton(pad, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1) ? "available" : "unavailable",
+               SDL_GamepadHasButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1) ? "available" : "unavailable",
+               SDL_GamepadHasButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2) ? "available" : "unavailable");
 }
 
 // Under lock: the layout of the open gamepad, picked again when a setting or the gamepad changed; logs each change.
@@ -334,7 +358,7 @@ static int pad_layout_get(void) {
     pad_layout_seen = ver;
     int was = pad_layout;
     const char *set = cfg_value("TOTK_PAD_LAYOUT");
-    pad_layout = input_pad_layout_pick(set, pad_east_a);
+    pad_layout = input_deck_mode() && !strcmp(set, "auto") ? PAD_LAYOUT_NINTENDO : input_pad_layout_pick(set, pad_east_a);
     if (pad_layout != was)
         rt_log("input: gamepad layout %s (pad_layout = %s)", pad_layout == PAD_LAYOUT_XBOX ? "xbox" : "nintendo", set);
     plat_xchg32(&pad_layout_shown, pad_layout);
@@ -398,6 +422,9 @@ static void start(void) {
     binds_refresh();
     const char *e = cfg_get("TOTK_INPUT");
     if (e && !strcmp(e, "none")) { state = -1; rt_log("input: disabled (TOTK_INPUT=none)"); return; }
+#if defined(__linux__)
+    if (input_deck_mode()) SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "1");
+#endif
     if (!SDL_Init(SDL_INIT_GAMEPAD)) { state = -1; rt_log("input: SDL gamepad init failed (%s), keyboard only", SDL_GetError()); }
     else state = 1;
     if (state == 1) test_pad_attach();
@@ -438,6 +465,11 @@ static int pad_read(uint64_t *b, int32_t sl[2], int32_t sr[2]) {
     uint8_t pd[PAD_COUNT] = {0};
     if (!pad_physical(pd)) return 0;
     *b |= input_map_pad_buttons(pd, pad_layout_get());
+    if (input_deck_mode()) {
+        const char *plus = cfg_get("TOTK_BIND_PLUS"), *minus = cfg_get("TOTK_BIND_MINUS");
+        if (pd[PAD_RPADDLE1] && (!plus || !*plus)) *b |= 1ull << B_PLUS;
+        if (pd[PAD_RPADDLE2] && (!minus || !*minus)) *b |= 1ull << B_MINUS;
+    }
     float dead = stick_dead_get();
     stick(SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, dead, sl);
     stick(SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, dead, sr);
@@ -458,8 +490,8 @@ static void poll_merged(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx
     if (!state) start();
     if (state > 0) {
         binds_refresh();
-        if (state == 1) pad_read(&b, sl, sr);
-        if (ikb_foreground()) {
+        int have_pad = state == 1 && pad_read(&b, sl, sr);
+        if (ikb_foreground() && !(input_deck_mode() && have_pad)) {
             uint8_t down[KEY_COUNT] = {0};
             // Mouse buttons count only while the cursor is captured, and a button already held when the capture began
             // (the click that refocused the window) is ignored until it is released.
@@ -489,7 +521,14 @@ static void poll_merged(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx
     // Minus and Plus held together (gamepad or keys) open or close the menu and never reach the game
     static int combo_held;
     int32_t st[4] = {sl[0], sl[1], sr[0], sr[1]};
-    int toggle = input_menu_gate(&combo_held, menu_is_open(), &b, st);
+    int toggle = input_deck_mode() ? 0 : input_menu_gate(&combo_held, menu_is_open(), &b, st);
+    static int l4_held;
+    if (input_deck_mode() && state == 1 && pad && input_deck_paddle_available()) {
+        int down = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1);
+        if (down && !l4_held) toggle = 1;
+        l4_held = down;
+    } else l4_held = 0;
+    if (input_deck_mode() && menu_is_open()) b = 0, st[0] = st[1] = st[2] = st[3] = 0;
     static int overlay_held;   // L3+R3 step the performance overlay (F10)
     int overlay = input_overlay_gate(&overlay_held, &b);
     sl[0] = st[0], sl[1] = st[1], sr[0] = st[2], sr[1] = st[3];
@@ -589,6 +628,10 @@ int input_capture(int reset, int *id) {
     plat_mutex_lock(&lock);
     if (!state) start();
     if (state == 1) pad_physical(p);
+    if (input_deck_mode() && state == 1 && pad) {
+        memset(k, 0, sizeof k);
+        esc = 0;
+    }
     plat_mutex_unlock(&lock);
     int got = INPUT_CAPTURE_NONE;
     if (!reset) {

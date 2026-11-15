@@ -75,7 +75,7 @@ You also need **`prod.keys`** from the same console.
 | | Platform | Status |
 |---|---|---|
 | 🟢 | Windows 10 / 11 | Tested (Ryzen 7 9800X3D, RTX 5080) |
-| ⚪ | Linux, Steam Deck, Proton / Wine | Not tested. The runtime has a Linux port, but the launcher is a Windows program. Reports are welcome |
+| 🧪 | Linux, Steam Deck | Experimental native AppImage launcher. Some scenery may be missing and performance may vary; Linux/Vulkan reports and pull requests are welcome. See [Linux launcher guide](docs/launcher-linux.md) |
 
 ## Status
 

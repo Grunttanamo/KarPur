@@ -1,0 +1,24 @@
+name: Linux launcher check
+
+on:
+  push:
+    paths:
+      - launcher-linux/**
+      - .github/workflows/linux-launcher.yml
+  pull_request:
+    paths:
+      - launcher-linux/**
+      - .github/workflows/linux-launcher.yml
+
+jobs:
+  launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build Linux launcher
+        run: dotnet publish launcher-linux/KarPurLauncher.Linux.csproj -c Release -r linux-x64 --self-contained true -o /tmp/karpur-linux-launcher
+      - name: Run synthetic launcher checks
+        run: /tmp/karpur-linux-launcher/KarPur-Launcher-Linux --self-check

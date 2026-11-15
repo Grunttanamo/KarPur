@@ -107,7 +107,7 @@ def compile_all(clang, ninja, gen, build, modules):
     proc.wait()
     (build / 'compile.log').write_text(''.join(log), encoding='utf-8')
     ok = sum(1 for o in objs if o.is_file())
-    errors = [line.strip() for line in log if ': error:' in line]
+    errors = [line.strip() for line in log if ': error:' in line or line.startswith('error:')]
     return len(sources), ok, errors, time.perf_counter() - t
 
 
@@ -133,7 +133,10 @@ def main():
     sys.path.insert(0, str(ROOT / 'tools'))
     from cpu_march import march   # the CPU level of this PC (tools/cpu_march.py)
     level = march(clang)
-    GEN_FLAGS[:] = [f'-march={level}' if f.startswith('-march=') else f for f in GEN_FLAGS]
+    if os.environ.get('KARPUR_PORTABLE_ZIG') == '1' and not WIN:
+        GEN_FLAGS[:] = [f'-mcpu={level.replace("-", "_")}' if f.startswith('-march=') else f for f in GEN_FLAGS]
+    else:
+        GEN_FLAGS[:] = [f'-march={level}' if f.startswith('-march=') else f for f in GEN_FLAGS]
     free = shutil.disk_usage(ROOT).free
     if free < 8 * 2**30:
         sys.exit(f'error: only {free / 2**30:.1f} GiB free on the drive of {ROOT}; lifting needs about 8 GiB')

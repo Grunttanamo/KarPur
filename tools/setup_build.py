@@ -29,9 +29,14 @@ import toolchain_msys2  # noqa: E402
 
 STATE = ROOT / 'build' / 'setup_state.json'
 LOG = ROOT / 'build' / 'setup.log'
-EXE = ROOT / 'build' / 'game' / 'karpur.exe'
-HACTOOL = ROOT / 'toolchain' / 'hactool' / 'hactool.exe'
-XLATE = ROOT / 'build' / 'xlate' / 'totk_xlate.exe'
+WIN = os.name == 'nt'
+EXE = ROOT / 'build' / 'game' / ('karpur.exe' if WIN else 'karpur')
+HACTOOL = ROOT / 'toolchain' / 'hactool' / ('hactool.exe' if WIN else 'hactool')
+XLATE = ROOT / 'build' / 'xlate' / ('totk_xlate.exe' if WIN else 'totk_xlate')
+LINUX_PREFIX = ROOT / 'toolchain' / 'linux'
+PORTABLE = ROOT / 'toolchain' / 'portable'
+PORTABLE_DEPS = ROOT / 'toolchain' / 'deps-linux'
+ZIG = ROOT / 'toolchain' / 'zig' / 'zig'
 MSYS = ROOT / 'toolchain' / 'msys2'
 FREE_GB = 30   # docs/setup-windows.md: about 30 GB during the setup
 
@@ -85,7 +90,7 @@ def check(a):
     for p, what in [(HACTOOL, 'hactool'), (XLATE, 'the shader translator')]:
         if not p.is_file():
             raise StepError(f'{what} is missing ({p}): the release folder is incomplete')
-    q = lambda p: "'" + str(p.resolve()) + "'"
+    q = lambda p: "'" + str(p.resolve()) + "'" if WIN else json.dumps(str(p.resolve()), ensure_ascii=False)
     dlc = ', '.join(q(d) for d in a.dlc)
     (ROOT / 'config.local.toml').write_text(
         f'# Written by tools/setup_build.py\n[game]\nbase = {q(a.base)}\nupdate = {q(a.update)}\ndlc = [{dlc}]\n\n'
@@ -200,7 +205,7 @@ STEP_OUTPUTS = {
     'dlc': ['game/dlc'],
     'menu': ['game/ui_patch.txt'],
     'fps': ['build/fps_patches.txt'],
-    'build': ['build/game/karpur.exe'],
+    'build': [EXE.relative_to(ROOT).as_posix()],
     'shaders': ['build/game/shader-prepared.bin'],
 }
 DEPENDENTS = {
@@ -267,9 +272,61 @@ def plan(state):
         work.update(['lift', 'fps'])   # build_game.py compiles from generated/: an older install's cleanup removed it
     if 'selftest' not in done:
         work.add('selftest')
-    if work & {'lift', 'build'} and toolchain_msys2.missing(MSYS):
+    if work & {'lift', 'build'} and (not WIN or toolchain_msys2.missing(MSYS)):
         work.add('toolchain')   # also when a stopped run left it part way through: fetch() carries on where it stopped
     return ['check'] + [s for s in STEPS if s in work and s not in ('check', 'cleanup')] + ['cleanup']
+
+
+def linux_toolchain():
+    required = [ZIG, PORTABLE / 'bin' / 'clang', PORTABLE / 'bin' / 'llvm-ar', PORTABLE / 'bin' / 'ninja',
+                PORTABLE_DEPS / 'include' / 'SDL3' / 'SDL.h', PORTABLE_DEPS / 'include' / 'vulkan' / 'vulkan.h',
+                PORTABLE_DEPS / 'include' / 'opus' / 'opus.h', PORTABLE_DEPS / 'include' / 'vpx' / 'vpx_decoder.h',
+                PORTABLE_DEPS / 'include' / 'vma' / 'vk_mem_alloc.h',
+                PORTABLE_DEPS / 'lib' / 'libopus.a', PORTABLE_DEPS / 'lib' / 'libvpx.a',
+                PORTABLE_DEPS / 'lib' / 'libzstd.a', PORTABLE_DEPS / 'lib' / 'libSDL3.so',
+                PORTABLE_DEPS / 'lib' / 'libSDL3.so.0', PORTABLE_DEPS / 'lib' / 'libvulkan.so',
+                PORTABLE_DEPS / 'lib' / 'libclang_rt.builtins-x86_64.a']
+    if all(file.is_file() for file in required):
+        out('LOG Bundled Linux compiler and development libraries found')
+        return
+    missing = [name for name in ('clang', 'ld.lld', 'ninja', 'pkg-config') if not shutil.which(name)]
+    if shutil.which('pkg-config'):
+        for name in ('vulkan', 'opus', 'vpx', 'libzstd'):
+            if subprocess.run(['pkg-config', '--exists', name]).returncode:
+                missing.append(name + ' development files')
+    if not (LINUX_PREFIX / 'include' / 'SDL3' / 'SDL.h').is_file():
+        missing.append('bundled SDL3 headers')
+    if missing:
+        os_release = Path('/etc/os-release').read_text(errors='replace').lower() if Path('/etc/os-release').is_file() else ''
+        if 'id=steamos' in os_release or 'id="steamos"' in os_release:
+            raise StepError('The AppImage is missing build tools. Use the complete current AppImage; missing: '
+                            + ', '.join(missing))
+        raise StepError('Linux build dependencies missing: ' + ', '.join(missing) +
+                        '. Ubuntu/Debian: sudo apt install clang lld ninja-build pkg-config libvulkan-dev '
+                        'libopus-dev libvpx-dev libzstd-dev. See docs/launcher-linux.md.')
+    out('LOG Linux compiler and libraries found')
+
+
+def build_native(py, env):
+    command = [py, 'tools/build_game.py']
+    if ZIG.is_file():
+        env['KARPUR_PORTABLE_ZIG'] = '1'
+        env['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build' / 'zig-cache')
+        command += ['--toolchain', PORTABLE, '--ninja', PORTABLE / 'bin' / 'ninja', '--deps', PORTABLE_DEPS]
+    run('build', command, env, ninja_progress)
+    if not WIN:
+        libdir = (PORTABLE_DEPS if ZIG.is_file() else LINUX_PREFIX) / 'lib'
+        for lib in libdir.glob('libSDL3.so*'):
+            shutil.copy2(lib, EXE.parent / lib.name)
+
+
+def lift_native(py, env):
+    command = [py, 'tools/lift.py']
+    if ZIG.is_file() and not WIN:
+        env['KARPUR_PORTABLE_ZIG'] = '1'
+        env['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build' / 'zig-cache')
+        command += ['--clang', PORTABLE / 'bin' / 'clang', '--ninja', PORTABLE / 'bin' / 'ninja']
+    run('lift', command, env, lift_progress)
 
 
 def main():
@@ -290,20 +347,28 @@ def main():
         state = {'inputs': fp, 'done': [], 'hashes': {}}
     done, hashes = state['done'], state.setdefault('hashes', {})
     ucrt = MSYS / 'ucrt64'
-    env = dict(os.environ, KARPUR_UCRT=str(ucrt), PYTHONUNBUFFERED='1', PYTHONIOENCODING='utf-8')
+    env = dict(os.environ, PYTHONUNBUFFERED='1', PYTHONIOENCODING='utf-8')
+    if WIN:
+        env['KARPUR_UCRT'] = str(ucrt)
+    else:
+        env.pop('KARPUR_UCRT', None)
+        if ZIG.is_file():
+            env.pop('KARPUR_LINUX_PREFIX', None)
+        else:
+            env['KARPUR_LINUX_PREFIX'] = str(LINUX_PREFIX)
     py = sys.executable
     actions = {
         'check': lambda: check(a),
-        'toolchain': lambda: toolchain_msys2.fetch(MSYS, log=out),
+        'toolchain': lambda: toolchain_msys2.fetch(MSYS, log=out) if WIN else linux_toolchain(),
         'extract': lambda: run('extract', [py, 'tools/extract.py'], env),
         'fonts': lambda: run('fonts', [py, 'tools/extract_fonts.py'] + (['--firmware', a.firmware] if a.firmware else []), env),
         'romfs': lambda: run('romfs', [py, 'tools/extract_romfs.py'], env),
         'dlc': lambda: run('dlc', [py, 'tools/extract_dlc.py'], env),
         'menu': menu,
         'fps': lambda: run('fps', [py, 'tools/fps_patches.py'], env),
-        'icon': lambda: icon(py, env),
-        'lift': lambda: run('lift', [py, 'tools/lift.py'], env, lift_progress),
-        'build': lambda: run('build', [py, 'tools/build_game.py'], env, ninja_progress),
+        'icon': lambda: icon(py, env) if WIN else out('LOG Linux launcher uses the bundled edition artwork'),
+        'lift': lambda: lift_native(py, env),
+        'build': lambda: build_native(py, env),
         'selftest': lambda: run('selftest', [EXE, '--selftest'], env),
         'shaders': lambda: shaders(env),
         'cleanup': lambda: None if a.keep else cleanup(),

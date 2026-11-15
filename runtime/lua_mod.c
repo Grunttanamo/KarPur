@@ -39,12 +39,18 @@
 #define TAG_SHORT_STR 0x44        // LUA_VSHRSTR with the collectable bit
 #define TAG_LONG_STR 0x54         // LUA_VLNGSTR with the collectable bit
 
+#if defined(__linux__)
+static const char builtin[] = {
+#include "menu_mod.inc"
+};
+#else
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"
 static const char builtin[] = {
 #embed "lua/menu_mod.lua"
 };
 #pragma clang diagnostic pop
+#endif
 
 #define MAX_STATES 16
 

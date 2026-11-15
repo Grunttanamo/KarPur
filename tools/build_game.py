@@ -85,6 +85,10 @@ else:
                   '"-Wl,-Map=$builddir/karpur.map"']
     LINK_LIBS = ['-lvulkan', '-lSDL3', '-lopus', '-lvpx', '-lzstd', '-l:libstdc++.a', '-lm', '-lpthread', '-ldl']
     VMA_INCLUDE = Path('/usr/include')   # vk_mem_alloc.h; Arch (AUR) vulkan-memory-allocator, Debian libvulkan-memory-allocator-dev
+    if os.environ.get('KARPUR_LINUX_PREFIX'):
+        prefix = Path(os.environ['KARPUR_LINUX_PREFIX']).resolve().as_posix()
+        RT_FLAGS += ['-I', '"' + prefix + '/include"']
+        LINK_FLAGS += ['-L', '"' + prefix + '/lib"']
 # Without a system vk_mem_alloc.h, the header the Windows release pins (tools/make_release.py, VMA 3.4.0) is fetched once
 # into toolchain/vma: one MIT header (THIRD_PARTY_NOTICES.md), checked against its hash.
 VMA_FETCH = ('https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/v3.4.0/include/vk_mem_alloc.h',
@@ -766,6 +770,14 @@ def main():
         # the libSDL3.so.0 beside it
         for lib in ('opus', 'vpx', 'zstd'):
             LINK_LIBS[LINK_LIBS.index(f'-l{lib}')] = f'-l:lib{lib}.a'
+    if not WIN and os.environ.get('KARPUR_PORTABLE_ZIG') == '1':
+        GEN_FLAGS.append('-g0')
+        RT_FLAGS[:] = [flag for flag in RT_FLAGS if flag != '-g'] + ['-g0']
+        LINK_LIBS[LINK_LIBS.index('-l:libstdc++.a')] = '-lc++ -lc++abi'
+        for lib in ('opus', 'vpx', 'zstd'):
+            LINK_LIBS[LINK_LIBS.index(f'-l:lib{lib}.a')] = cmd_path(DEPS / 'lib' / f'lib{lib}.a')
+        LINK_LIBS.append(cmd_path(DEPS / 'lib' / 'libclang_rt.builtins-x86_64.a'))
+        LINK_FLAGS[:] = [flag for flag in LINK_FLAGS if '-Map=' not in flag]
     if args.sysroot and not WIN:
         # Every compile and the link: the game then needs no newer glibc than the sysroot's (the Steam Runtime's)
         sysroot = ['--target=x86_64-linux-gnu', f'--sysroot={cmd_path(args.sysroot.resolve())}']
@@ -779,7 +791,8 @@ def main():
     if not args.sysroot:   # a build for this PC: the CPU level it has (a release for others keeps x86-64-v3)
         level = march(CLANG)
         for flags in (GEN_FLAGS, RT_FLAGS):
-            flags[:] = [f'-march={level}' if f.startswith('-march=') else f for f in flags]
+            flags[:] = [f'-mcpu={level.replace("-", "_")}' if os.environ.get('KARPUR_PORTABLE_ZIG') == '1' and f.startswith('-march=')
+                        else f'-march={level}' if f.startswith('-march=') else f for f in flags]
         if level != 'x86-64-v3':
             print(f'cpu: building for {level} (this CPU lacks AVX2, FMA or BMI2)', flush=True)
     if not (gen / 'layout.json').is_file():
@@ -806,6 +819,12 @@ def main():
         print(f'build_game: warning: no {paths["romfs"] / "index.json"}; {EXE} will have no RomFS', file=sys.stderr)
     global RUNTIME
     RUNTIME = (args.runtime or RUNTIME).resolve()
+    if not WIN:
+        for source, target in ((RUNTIME / 'lua' / 'menu_mod.lua', 'menu_mod.inc'),
+                               (RUNTIME / 'ui' / 'fonts' / 'Roboto-Medium.ttf', 'roboto_ttf.inc')):
+            data = source.read_bytes()
+            write_if_changed(out / target, ''.join(f'0x{byte:02x},' + ('\n' if i % 16 == 15 else ' ')
+                                                   for i, byte in enumerate(data)))
     stale = stale_shaders(RUNTIME)
     if stale:
         sys.exit(f'{stale[0]}: its SPIR-V header no longer matches; run python tools/build_shaders.py')

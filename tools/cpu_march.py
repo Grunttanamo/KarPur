@@ -15,6 +15,12 @@ def march(clang):
     forced = os.environ.get('KARPUR_MARCH')
     if forced:
         return forced
+    if os.environ.get('KARPUR_PORTABLE_ZIG') == '1' and os.name != 'nt':
+        try:
+            flags = next(line.split(':', 1)[1].split() for line in open('/proc/cpuinfo') if line.startswith('flags'))
+            return 'x86-64-v3' if {'avx2', 'fma', 'bmi2'} <= set(flags) else 'x86-64-v2'
+        except (OSError, StopIteration):
+            return 'x86-64-v2'
     try:
         out = subprocess.run([str(clang), '-march=native', '-E', '-dM', '-x', 'c', os.devnull],
                              capture_output=True, text=True, timeout=60).stdout

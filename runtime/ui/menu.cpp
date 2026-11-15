@@ -58,12 +58,18 @@ extern const char rt_port_version[];
 }
 
 // Roboto Medium (Apache-2.0, ui/fonts/LICENSE-Roboto.txt) with Latin and Cyrillic glyphs.
+#if defined(__linux__)
+static const unsigned char roboto_ttf[] = {
+#include "roboto_ttf.inc"
+};
+#else
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wc23-extensions"   // #embed in C++
 static const unsigned char roboto_ttf[] = {
 #embed "fonts/Roboto-Medium.ttf"
 };
 #pragma clang diagnostic pop
+#endif
 
 // ---- open state, any thread
 static std::atomic<int> g_open;     // the menu is open
