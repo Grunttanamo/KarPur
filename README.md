@@ -69,6 +69,7 @@ You also need **`prod.keys`** from the same console.
 | **Memory** | 16 GB RAM recommended |
 | **Disk** | About **30 GB free** while building; about 13 GB stay in use afterwards |
 | **Internet** | For the first build (about 250 MB of tools, all checked against fixed checksums) |
+| **Resizable Bar Activated** | For better performance and less crash |
 
 ### Platforms
 
