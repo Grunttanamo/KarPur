@@ -1,6 +1,6 @@
 <div align="center">
 
-# <img width="960" height="540" alt="karpur_logov3" src="https://github.com/user-attachments/assets/6e0782d8-018e-4c6c-8970-5357477758b3" />
+# <img width="542" height="176" alt="KarPur_s" src="https://github.com/user-attachments/assets/7f471ad8-26c9-42bb-8381-840466c7921d" />
 
 
 **Pokémon Scarlet & Violet, recompiled into a native PC game.**
