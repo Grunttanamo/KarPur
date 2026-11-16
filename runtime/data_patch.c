@@ -72,8 +72,6 @@
 
 double gfx_window_refresh_hz(void);   // ui/menu.h, which is for the menu's C++ side too
 
-#define MAX_FIELDS 16384   // a large mod (Pokemon Compass: 2032 files) raises one size field per file
-
 typedef struct {
     uint64_t at;   // byte offset in romfs.bin, or in the unpacked file (decoded)
     uint64_t packed, unpacked, print;   // decoded: which file
@@ -85,10 +83,24 @@ typedef struct {
     char name[64];
 } Field;
 
-static Field fields[MAX_FIELDS];   // romfs fields, sorted by offset
-static int nfields;
-static Field decoded[MAX_FIELDS];  // fields of Oodle-packed files
-static int ndecoded;
+// Grown as the lists are read (data_patch_init, before the game reads a file): a mod raises one size field per file,
+// and a texture pack has tens of thousands (#74: 19911); a fixed cap dropped the size fields past it and kept their files.
+static Field *fields;    // romfs fields, sorted by offset
+static int nfields, cap_fields;
+static Field *decoded;   // fields of Oodle-packed files
+static int ndecoded, cap_decoded;
+
+// Appends f to *list; 0 when the memory for it could not be had.
+static int field_push(Field **list, int *n, int *cap, const Field *f) {
+    if (*n == *cap) {
+        int c = *cap ? *cap * 2 : 1024;
+        Field *grown = realloc(*list, (size_t)c * sizeof *grown);
+        if (!grown) return 0;
+        *list = grown, *cap = c;
+    }
+    (*list)[(*n)++] = *f;
+    return 1;
+}
 
 #define MAX_TEXTS 1024
 typedef struct {
@@ -573,8 +585,13 @@ static int load_list(const char *path, float view, float spawn, float count, int
                          : !strcmp(group, "count") ? count : 1.0f;
             }
             if (!f.type || (!f.absolute && f.factor == 1.0f)) (*skipped)++;
-            else if (romfs && nfields < MAX_FIELDS) fields[nfields++] = f, taken++;
-            else if (oodle && ndecoded < MAX_FIELDS) decoded[ndecoded++] = f, taken++;
+            else if (romfs ? field_push(&fields, &nfields, &cap_fields, &f)
+                           : field_push(&decoded, &ndecoded, &cap_decoded, &f)) taken++;
+            else {
+                // Out of memory: a mod file whose size field is missing must not be replaced either (all or nothing)
+                (*skipped)++;
+                if (!strncmp(f.name, "modsize:", 8)) mod_file_failed = 1;
+            }
         }
         line = nl + 1;
     }
@@ -609,7 +626,7 @@ void data_patch_init(void) {
                        .type = population[i].type, .absolute = 1, .value = population[i].value};
             if (!f.value) f.value = wild;
             snprintf(f.name, sizeof f.name, "%s", population[i].name);
-            decoded[ndecoded++] = f;
+            field_push(&decoded, &ndecoded, &cap_decoded, &f);
         }
         rt_log("data patch: population %s, up to %d wild Pokemon at once", level, wild);
     }

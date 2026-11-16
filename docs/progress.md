@@ -1,5 +1,20 @@
 # Progress
 
+## Data patch fields grow with the lists (issue #74, 2026-11-16)
+
+- Issue #74: a 4K texture pack names 19,911 mod files, and each raises one size field. `runtime/data_patch.c` held
+  fields in two fixed arrays of 16,384 (`MAX_FIELDS`); past that, `load_list` dropped the size fields silently but
+  kept their mod files, so the files no longer matched their sizes.
+- `fields` and `decoded` are now grown with `realloc` as the lists are read (`field_push`, the same pattern as
+  `mod_files`). If memory for a `modsize:` field cannot be had, `mod_file_failed` is set, so the existing
+  all-or-nothing rule drops every mod file instead of leaving some without their size. The exe's `.data` shrinks
+  by about 3.8 MiB, since the two static arrays are gone.
+- Tested on an RX 9070 XT build: `--selftest` passes; a synthetic `TOTK_MOD_VALUES` list of 20,000 fields at offsets
+  past the end of `romfs.bin` loads all of them ("20000 fields in stored files"). Not tested with the texture pack.
+- Not addressed: the guest allocation crash with the full pack (`MapPhysicalMemory ... failed 0x10801`, the
+  application pool of `DEFAULT_POOL` 0xCD500000 plus the resolution extra, `TOTK_APP_POOL` overrides it). Whether a
+  bigger pool helps, or the game's fixed heaps are the limit, needs a test by someone with the pack.
+
 ## Experimental Linux launcher 0.3.8 (2026-11-15)
 
 - The separate `launcher-linux/` Avalonia frontend and `tools/make_appimage.py` provide an experimental Linux
