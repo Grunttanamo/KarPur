@@ -1,5 +1,37 @@
 # Progress
 
+## A probe for the lighting pass and the water: GTAO, SSGI, water reflections (2026-11-16)
+
+- Goal: ambient occlusion (GTAO), screen-space indirect light (SSGI) and water reflections as in ZA Recomp
+  (PokeZ-ARecomp, MIT, commit `280098af`, read in `refs/`). Its shaders (`runtime/nvn/vulkan/shaders.c` gtao*.frag,
+  ssgi*.frag, water_ssr*.frag) are generic and portable. Its hooks are Z-A-specific and must be found again in Violet:
+  - GTAO and SSGI hang off Z-A's deferred lighting draw (one full-screen draw: texture 0 and 1 the scene depth, then
+    the G-buffer's normals (RGBA8, octahedral 12-bit) and albedo (sRGB), and reflection cubes; camera in fragment
+    constant buffer 2: rows 12-15 depth -> world, row 19 the eye, rows 20/21 tan of half the fov). AO is made from
+    the depth at half size right before that draw (two 5x5 depth-aware blurs) and multiplied onto its target when its
+    pass ends; SSGI (one bounce from the lit image, x albedo) is added after.
+  - Water: a draw blended onto the lit image, writing the scene depth, sampling a depth texture. Depth and lit image
+    are copied before it; afterwards, where the depth got nearer is water, and a mirror ray is marched there against
+    the depth from before the water (fallback: sky on screen, then the lighting's largest reflection cube).
+- KarPur already has the camera (vertex c5 +0 of the G-buffer draws, `vk_taa.c`), so the depth -> world matrix,
+  eye and fov can come from there. What is missing is which draw is Violet's lighting pass, its texture slots, and
+  whether Violet's water is drawn like Z-A's.
+- New: `TOTK_LIGHT_PROBE=1` (`runtime/vk_light_probe.c`, diagnostic, default off). Per frame it notes the G-buffer
+  pass (4+ colour targets with depth) and keeps the draw runs that sample a depth texture or a G-buffer target, or
+  that look like water, with every texture they sample and its role (D the scene depth, G<i> G-buffer target i, cube).
+  It tags `[LIGHTING?]` (samples the scene depth and 2+ G-buffer targets, draws elsewhere) and `[WATER?]` (blend on,
+  depth test and write on the scene depth, samples a depth texture). For lighting candidates it searches their
+  fragment uniform blocks for the inverse of the G-buffer camera, the eye and tan of half the fov, and logs only the
+  offsets. New candidates are logged as they appear; every 600 frames the whole list. Only ids, sizes, formats and
+  offsets: no texel or matrix values. `vk_exec_draw.c` gained `vk_exec_ubo_copy` (a uniform block's bytes as the
+  replay holds them).
+- **Not compiled yet**: written on a machine without the toolchain. Build it first.
+- Test DE: run with `TOTK_LIGHT_PROBE=1`, stand in the open by a lake or the sea (in daylight) for at least 20 seconds,
+  then indoors for 20 seconds; send the `light_probe:` lines of `karpur.log`. Wanted: the lighting shader id(s) and
+  which slot holds depth / normals / albedo / cube; where its camera is; whether Paldea's water matches the
+  `[WATER?]` pattern, and if it lands on the lit image. Then: GTAO first (the shared hook and camera), SSGI on it,
+  water with the screen-space search only.
+
 ## Data patch fields grow with the lists (issue #74, 2026-11-16)
 
 - Issue #74: a 4K texture pack names 19,911 mod files, and each raises one size field. `runtime/data_patch.c` held
@@ -11,6 +43,14 @@
   by about 3.8 MiB, since the two static arrays are gone.
 - Tested on an RX 9070 XT build: `--selftest` passes; a synthetic `TOTK_MOD_VALUES` list of 20,000 fields at offsets
   past the end of `romfs.bin` loads all of them ("20000 fields in stored files"). Not tested with the texture pack.
+- Tested in play with the HDPacks 4K pack (19,912 files) on an RX 9070 XT: no crash into the open world. 22
+  textures still logged "the game reserves N bytes for a mod file of M: original kept". The cause: 372 game files
+  the pack does not name have the same packed bytes as files it does (a texture stored under two paths; checked by
+  reading every pack's table). The runtime matches by packed bytes, so it gave them the mod's file, but their own
+  size was never raised. `tools/mod_files.py` now raises those too (`romfs ... modtwin:<hash>` lines, 368 of them;
+  the other 4 already fit), and the runtime treats `modtwin:` like `modsize:` when a mod file is missing. With
+  that, 20,280 fields and no "original kept" line. The tool's run grew to about 30 s, as it reads every pack's table.
+- A seam with a dotted shadow across the grass in one spot is there without the mod as well: not from the pack.
 - Not addressed: the guest allocation crash with the full pack (`MapPhysicalMemory ... failed 0x10801`, the
   application pool of `DEFAULT_POOL` 0xCD500000 plus the resolution extra, `TOTK_APP_POOL` overrides it). Whether a
   bigger pool helps, or the game's fixed heaps are the limit, needs a test by someone with the pack.

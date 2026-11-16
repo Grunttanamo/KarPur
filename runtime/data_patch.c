@@ -90,6 +90,12 @@ static int nfields, cap_fields;
 static Field *decoded;   // fields of Oodle-packed files
 static int ndecoded, cap_decoded;
 
+// A size raised for a mod file: the file's own (modsize:<name>) or that of a game file with the same packed bytes
+// (modtwin:<hash>, tools/mod_files.py), which is given the same mod file. Without the mod files, none may stay raised.
+static int is_mod_size(const char *name) {
+    return !strncmp(name, "modsize:", 8) || !strncmp(name, "modtwin:", 8);
+}
+
 // Appends f to *list; 0 when the memory for it could not be had.
 static int field_push(Field **list, int *n, int *cap, const Field *f) {
     if (*n == *cap) {
@@ -590,7 +596,7 @@ static int load_list(const char *path, float view, float spawn, float count, int
             else {
                 // Out of memory: a mod file whose size field is missing must not be replaced either (all or nothing)
                 (*skipped)++;
-                if (!strncmp(f.name, "modsize:", 8)) mod_file_failed = 1;
+                if (is_mod_size(f.name)) mod_file_failed = 1;
             }
         }
         line = nl + 1;
@@ -688,7 +694,7 @@ void data_patch_init(void) {
         if (mod_file_failed) {
             int kept = 0;
             for (int i = 0; i < nfields; i++)
-                if (strncmp(fields[i].name, "modsize:", 8)) fields[kept++] = fields[i];
+                if (!is_mod_size(fields[i].name)) fields[kept++] = fields[i];
             nfields = kept;
             for (int i = 0; i < nmod_files; i++) free(mod_files[i].path);
             nmod_files = 0;

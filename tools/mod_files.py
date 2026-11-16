@@ -9,6 +9,12 @@ for runtime/data_patch.c:
   modfile <packed> <unpacked> <fnv1a64> <path>      when the game unpacks the file with these packed bytes, the runtime
                                                     gives it the file at <path> instead
 
+The runtime knows a file by its packed bytes, not its path, so a game file the mod does not name but whose packed bytes
+are the same as a named one's (a texture stored under two paths: 372 such files for one 4K texture pack, issue #74)
+is given the mod's file too. Its size in its own pack's table must be raised as well, or the game reserves the
+original size and the runtime keeps the original ("the game reserves N bytes for a mod file of M"). Each such twin
+gets a romfs line of its own (modtwin:<name>); its modfile line is the named file's.
+
 The mod stays where it is, nothing of it is copied. Files stored unpacked are not supported and are reported. Prints
 paths and sizes only. Only the game's files are read, on the player's PC.
 
@@ -46,6 +52,37 @@ def game_path(game, path, fpath):
     return None
 
 
+def raise_twins(game, by_file, content):
+    """romfs lines for the game files the mod does not name whose packed bytes match a named file's (see the module
+    docstring). Every pack's table is read once; files of a packed size no named file has are skipped unread."""
+    named = {trpfs.fnv1a64(p) for p in by_file}
+    size_of = {}   # (packed size, fingerprint) -> the mod file's size (the runtime gives the first match)
+    for key, size in content.values():
+        size_of.setdefault(key, size)
+    packed_sizes = {k[0] for k in size_of}
+    lines = []
+    for pi in range(len(game.pack_names)):
+        toc = game.toc(pi)
+        game.tocs.pop(pi, None)   # one pack at a time: all of them would not fit in memory
+        if not toc:
+            continue
+        base = None
+        for h, entry in toc.items():
+            if h in named:
+                continue
+            start, packed = entry._vec(len(entry.slots) - 1)
+            if packed not in packed_sizes:
+                continue
+            key = (packed, trpfs.fnv1a64_bytes(entry.buf[start:start + min(packed, HEAD)]))
+            size = size_of.get(key)
+            if size is None or trpfs.codec(entry) == 'none' or size <= entry.scalar(3, 'Q'):
+                continue
+            if base is None:
+                base = game.fs_off + game.offset_of[trpfs.fnv1a64(game.pack_names[pi])]
+            lines.append(f'romfs {base + entry.pos + entry.slots[3]:x} u32 mod={size} modtwin:{h:016x}')
+    return lines
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('mod', type=Path, nargs='+', help='mod folders')
@@ -56,6 +93,7 @@ def main():
     lines = ['# made by tools/mod_files.py; runtime/data_patch.c, TOTK_MOD_FILES=1']
     skipped = 0
     by_file = {}   # the game's path -> its two lines, the later mod's
+    content = {}   # the game's path -> ((packed size, fingerprint), mod file size), the later mod's
     summary = []
     for folder in a.mod:
         mod = {'mod': str(folder), 'replaces': 0, 'adds': 0, 'unpacked': 0,
@@ -83,14 +121,18 @@ def main():
             name = Path(found).name
             by_file[found] = [f'romfs {base + entry.pos + entry.slots[3]:x} u32 mod={size} modsize:{name}',
                               f'modfile {packed} {unpacked} {print_:016x} {fpath.resolve()}']
+            content[found] = ((packed, print_), size)
             mod['replaces'] += 1
             print(f'{found}: game {unpacked} B, mod {size} B')
     for pair in by_file.values():
         lines += pair
+    twins = raise_twins(game, by_file, content)
+    lines += twins
     out = a.out
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-    print(f'{(len(lines) - 1) // 2} files listed in {out}' + (f', {skipped} left out' if skipped else ''))
+    print(f'{len(by_file)} files listed in {out}' + (f', {skipped} left out' if skipped else '') +
+          (f'; {len(twins)} identical copies elsewhere in the game raised too' if twins else ''))
     print('SUMMARY ' + json.dumps(summary), flush=True)
 
 
