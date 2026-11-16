@@ -147,7 +147,26 @@ partial class MainForm
     {
         try { mods = JsonSerializer.Deserialize<List<ModEntry>>(File.ReadAllText(ModsFile)) ?? new(); }
         catch { mods = new(); }
+        FollowIni();
         RenderMods();
+    }
+
+    // The game reads only "mod_files" in karpur.ini, and that can change without this page: a hand edit, another tool,
+    // or a failed preparation. So the switches follow it here instead of showing mods on that the game will not use.
+    // mod_files = 0: every mod is shown off. mod_files = 1 with none on here: the game's list was made elsewhere, which
+    // this page cannot show per mod, so it says so. No [mods] entry yet (nothing applied so far): mods.json stays as is.
+    void FollowIni()
+    {
+        if (targetBox.Text == "") return;
+        string? state = new Ini(Builder.Ini(targetBox.Text)).Get("mod_files");
+        if (state == "0" && mods.Any(m => m.Enabled))
+        {
+            foreach (var m in mods) m.Enabled = false;
+            SaveMods();
+            ModMessage("karpur.ini starts the game without mods (mod_files = 0), so every mod is shown off. Switch one on to use it again.");
+        }
+        else if (state != null && state != "0" && mods.Count > 0 && !mods.Any(m => m.Enabled))
+            ModMessage($"karpur.ini starts the game with mods (mod_files = {state}), but none is switched on here. Switch the ones you want on, or one on and off to use none.");
     }
 
     void SaveMods()
