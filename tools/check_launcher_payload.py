@@ -20,7 +20,7 @@ using System.Text;
 
 var builder = Assembly.Load("KarPur-Launcher").GetType("KarPurLauncher.Builder", throwOnError: true)!;
 var unpack = builder.GetMethod("UnpackPayload", BindingFlags.NonPublic | BindingFlags.Static)!;
-string root = Path.Combine(AppContext.BaseDirectory, "installed");
+string root = Path.Combine(AppContext.BaseDirectory, "installed path with spaces");
 Directory.CreateDirectory(Path.Combine(root, "runtime"));
 Directory.CreateDirectory(Path.Combine(root, "build", "game", "obj", "runtime"));
 string source = Path.Combine(root, "runtime", "resolution.c");

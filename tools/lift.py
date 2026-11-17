@@ -120,8 +120,8 @@ def main():
     ap.add_argument('--clang', help='clang executable (default: MSYS2 UCRT64, else PATH)')
     ap.add_argument('--ninja', help='ninja executable (default: MSYS2 UCRT64, else PATH)')
     ap.add_argument('--skip-gen', action='store_true', help='compile what generated/ already holds')
-    ap.add_argument('--patches', type=Path, help='code patch table for gen.py (recomp/patches.py), e.g. the one '
-                    'tools/consts.py --patch-file writes; default build/fps_patches.txt when it exists')
+    ap.add_argument('--patches', type=Path, help='code patch table for gen.py (recomp/patches.py); '
+                    'defaults to build/sv_host_targets.txt when verified, otherwise build/fps_patches.txt')
     ap.add_argument('--gen-only', action='store_true',
                     help='only lift (tools/build_game.py compiles what changed and links)')
     args = ap.parse_args()
@@ -141,10 +141,20 @@ def main():
     if free < 8 * 2**30:
         sys.exit(f'error: only {free / 2**30:.1f} GiB free on the drive of {ROOT}; lifting needs about 8 GiB')
 
-    default = ROOT / 'build' / 'fps_patches.txt'   # tools/fps_patches.py: Violet's frame-rate set
-    if args.patches is None and default.is_file():
-        args.patches = default
-        print(f'patch table: {default} (tools/fps_patches.py)')
+    baseline = ROOT / 'build' / 'fps_patches.txt'
+    host = ROOT / 'build' / 'sv_host_targets.txt'
+    supported = ROOT / 'build' / 'svhost_supported.txt'
+    host_verified = supported.is_file() and supported.read_text(encoding='utf-8').strip() == '1'
+    if args.patches is None:
+        args.patches = host if host_verified and host.is_file() else baseline if baseline.is_file() else None
+        if args.patches:
+            print(f'patch table: {args.patches}')
+    if host_verified and args.patches and args.patches.resolve() == baseline.resolve():
+        sys.exit('error: the FPS-only patch table would remove Render scale. Run tools/sv_host_targets.py '
+                 'and lift with --patches build/sv_host_targets.txt')
+    if host_verified and args.patches and args.patches.resolve() == host.resolve() and baseline.is_file() and \
+            host.stat().st_mtime_ns < baseline.stat().st_mtime_ns:
+        sys.exit('error: Render-scale patch table is older than the FPS table; run tools/sv_host_targets.py first')
     if args.patches and not args.patches.is_file():
         sys.exit(f'error: patch table {args.patches} not found')
     gen_s = 0.0 if args.skip_gen else generate(args.exefs, args.gen, modules, args.patches)

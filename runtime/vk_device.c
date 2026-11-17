@@ -10,6 +10,7 @@
 #include "host.h"
 #include "vk.h"
 #include "vk_dlaa.h"
+#include "vk_fsr2.h"
 #include "vk_slfg.h"
 #include "platform/platform.h"
 
@@ -445,8 +446,9 @@ static void destroy_all(void) {
     if (g_vk.device) vk_crumbs_release();
     if (g_vk.timeline) vkDestroySemaphore(g_vk.device, g_vk.timeline, NULL);
     vk_headroom_stop();
-    if (g_vk.vma) vmaDestroyAllocator(g_vk.vma);
+    if (g_vk.device) vk_fsr2_destroy(g_vk.device);
     if (g_vk.device) vk_dlaa_shutdown(g_vk.device);   // before the device goes: NGX keeps CUDA state on it
+    if (g_vk.vma) vmaDestroyAllocator(g_vk.vma);
     slfg_shutdown();   // Streamline before the device and instance go
     if (g_vk.device) vkDestroyDevice(g_vk.device, NULL);
     if (g_vk.messenger) {

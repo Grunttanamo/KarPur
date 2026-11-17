@@ -35,6 +35,7 @@
 #include <zstd.h>
 
 #include "cfg.h"
+#include "dispatch.h"
 #include "host.h"
 #include "platform/platform.h"
 
@@ -93,7 +94,88 @@ static int bigger(void) {
     return R.ow != BASE_W || R.oh != BASE_H || R.scene_set;
 }
 
+// Violet 4.0.0: change the game's render dimensions, never its 268 MiB target
+// pool or application pool. Enlarged targets get separate host images while
+// the game reserves its original-sized slots, as with the existing shadow map.
+static struct { int decided, requested, active; unsigned w, h; } SVHost;
+
+int res_sv_ui_fit(void) {
+    return SVHost.active && (uint64_t)SVHost.w * BASE_H != (uint64_t)SVHost.h * BASE_W;
+}
+
+// The perspective camera builder reads [x19 + 0x190] into s16 or s4. The
+// replacement executes that original load before calling us, so it sees the
+// correct guest register even when the lifter keeps x19 in a local variable.
+// Only 16:9 cameras need a wider aspect; orthographic UI cameras take another path.
+// Keeping the vertical FOV gives Hor+ without changing the camera object.
+static void sv_camera_aspect(Cpu *c, unsigned reg) {
+    float aspect;
+    memcpy(&aspect, &c->v[reg], sizeof aspect);
+    if (fabsf(aspect - 16.0f / 9.0f) < 0.01f)
+        aspect = (float)SVHost.w / (float)SVHost.h;
+    c->v[reg] = 0;
+    memcpy(&c->v[reg], &aspect, sizeof aspect);
+}
+
+static void sv_wide_s16(Cpu *c) { sv_camera_aspect(c, 16); }
+static void sv_wide_s4(Cpu *c) { sv_camera_aspect(c, 4); }
+
+// Taller outputs keep the game's horizontal field of view. The patched FMUL
+// has already produced fovy/2 in s0; x19 identifies that perspective camera.
+static void sv_tall_fovy(Cpu *c) {
+    float aspect, half;
+    if (!plat_mem_read(c->x[19] + 0x190, &aspect, sizeof aspect) ||
+        fabsf(aspect - 16.0f / 9.0f) >= 0.01f) return;
+    memcpy(&half, &c->v[0], sizeof half);
+    float shape = (float)SVHost.w * BASE_H / ((float)SVHost.h * BASE_W);
+    if (!(shape > 0.05f && shape < 1.0f && half > 0.0f && half < 1.5707f)) return;
+    half = atanf(tanf(half) / shape);
+    c->v[0] = 0;
+    memcpy(&c->v[0], &half, sizeof half);
+    static int logged;
+    if (!__atomic_exchange_n(&logged, 1, __ATOMIC_RELAXED))
+        rt_log("resolution host: perspective camera vertical FOV adjusted for %ux%u", SVHost.w, SVHost.h);
+}
+
+void res_sv_wide_init(void) {
+    if (rt_patch_set("svwide") < 0 || !rt_patch_page()) return;
+    rt_register_host((uint64_t)(uintptr_t)rt_patch_page() + 0xfa0, sv_wide_s16);
+    rt_register_host((uint64_t)(uintptr_t)rt_patch_page() + 0xfb0, sv_wide_s4);
+    if (rt_patch_set("svtall") >= 0)
+        rt_register_host((uint64_t)(uintptr_t)rt_patch_page() + 0xf80, sv_tall_fovy);
+}
+
+static void sv_host_decide(void) {
+    if (SVHost.decided) return;
+    SVHost.decided = 1;
+    const char *enabled = cfg_get("TOTK_SVHOST_TEST");
+    if (!enabled || strcmp(enabled, "1")) return;
+    const char *size = cfg_value("TOTK_OUTPUT_RES");
+    unsigned w = 0, h = 0;
+    char tail;
+    if (sscanf(size, "%ux%u%c", &w, &h, &tail) != 2 ||
+        !((w == 800 && h == 450) || (w == 854 && h == 480) || (w == 1280 && h == 720) ||
+          (w == 1920 && h == 1080) || (w == 2560 && h == 1440) ||
+          (w == 3840 && h == 2160) || (w == 2560 && h == 1080) ||
+          (w == 3440 && h == 1440) || (w == 5120 && h == 1440) ||
+          (w == 1440 && h == 1080) || (w == 1620 && h == 1080) ||
+          (w == 1920 && h == 1200) || (w == 1080 && h == 1920))) {
+        rt_log("resolution host: unsupported output %s; choose a Render scale in the launcher", size);
+        return;
+    }
+    SVHost.w = w, SVHost.h = h;
+    SVHost.requested = 1;
+}
+
+int res_sv_host_active(void) { return SVHost.active; }
+void res_sv_host_size(unsigned out[2]) {
+    out[0] = SVHost.active ? SVHost.w : 0;
+    out[1] = SVHost.active ? SVHost.h : 0;
+}
+
 uint64_t res_heap_extra_kib(void) {
+    sv_host_decide();
+    if (SVHost.requested) return 0;
     if (!bigger()) return 0;
     double grow = fmax(0.0, (double)R.ow * R.oh / (BASE_W * BASE_H) - 1.0) +
                   fmax(0.0, (double)R.sw * R.sh / (SCENE_W * SCENE_H) - 1.0);
@@ -102,8 +184,21 @@ uint64_t res_heap_extra_kib(void) {
 }
 
 uint64_t res_heap_extra_bytes(void) {
+    sv_host_decide();
+    if (SVHost.requested) return 0;
     return ((res_heap_extra_kib() << 10) + 0x1fffff) & ~0x1fffffull;
 }
+
+// Isolated A/B experiment: the 4096 depth and R8UI shadow textures cost
+// 120+30 MiB beyond their 1024 counterparts. Add 30 MiB margin, matching the
+// old +180 MiB experiment. This is off unless the child process sets the flag.
+uint32_t res_shadow_budget_extra_bytes(void) {
+    const char *flag = cfg_get("TOTK_SHADOW_BUDGET_TEST");
+    const char *side = cfg_get("TOTK_SHADOW_RES");
+    return flag && !strcmp(flag, "1") && side && !strcmp(side, "4096") ? 180u * 1024u * 1024u : 0;
+}
+
+int res_shadow_budget_active(void) { return rt_patch_enabled(rt_patch_set("shadow_budget")); }
 
 // ---- the HeapDef table. BYML version 2..7, little endian ("YB"): a hash node is {u8 0xC1, u24 count} and count
 // entries {u24 key index, u8 type, u32 value}; an int (type 0xD1) is stored in the entry, so a size changes in place.
@@ -203,6 +298,45 @@ uint32_t res_shadow_map_side(void) { return R.shadow_side ? R.shadow_side : 1024
 static uint64_t pack(unsigned w, unsigned h) { return (uint64_t)h << 32 | w; }
 
 void res_init(void) {
+    sv_host_decide();
+    if (SVHost.requested) {
+        // The svhost patch set is enabled by TOTK_SVHOST_TEST even at 1920x1080.
+        // Its page must be populated there too: the zeroed page made every image
+        // 1x1 when the launcher selected "Original".
+        int set = rt_patch_set("svhost");
+        uint8_t *page = rt_patch_page();
+        if (set < 0 || !page) {
+            rt_log("resolution host test: patch set unavailable; original image sizes retained");
+            return;
+        }
+        int shape = (uint64_t)SVHost.w * BASE_H != (uint64_t)SVHost.h * BASE_W;
+        int tall = (uint64_t)SVHost.w * BASE_H < (uint64_t)SVHost.h * BASE_W;
+        if (shape) {
+            int wide = rt_patch_set("svwide"), fovy = tall ? rt_patch_set("svtall") : -1;
+            if (wide < 0 || (tall && fovy < 0)) {
+                rt_log("resolution host: camera projection patch unavailable; shaped output disabled");
+                return;
+            }
+            rt_patch_switch(wide, 1);
+            if (tall) rt_patch_switch(fovy, 1);
+        }
+        uint32_t wh[2] = {SVHost.w, SVHost.h}, mode_w[2] = {1280, SVHost.w}, mode_h[2] = {720, SVHost.h};
+        uint32_t half[2] = {SVHost.w / 2, SVHost.h / 2};
+        float dims[2] = {(float)SVHost.w, (float)SVHost.h}, scale = 1.0f;
+        memcpy(page + 128, wh, sizeof wh);
+        memcpy(page + 136, mode_w, sizeof mode_w);
+        memcpy(page + 144, mode_h, sizeof mode_h);
+        memcpy(page + 152, dims, sizeof dims);
+        memcpy(page + 164, half, sizeof half);
+        memcpy(page + 172, &scale, sizeof scale);
+        rt_patch_switch(set, 1);
+        SVHost.active = 1;
+        rt_log("resolution host: %ux%u images, original 268 MiB game GPU pool and application pool unchanged",
+               SVHost.w, SVHost.h);
+        if (res_sv_ui_fit())
+            rt_log("resolution host: %s camera and centred 16:9 UI enabled", tall ? "Vert+" : "Hor+");
+        return;
+    }
     if (!bigger()) {
         rt_log("resolution: the game's own (output 1920x1080, scene 1600x900)");
         return;
@@ -308,6 +442,20 @@ void res_shadow_init(void) {
         invalidate_pipeline_cache_if_needed(1024);
         return;
     }
+    uint32_t extra = res_shadow_budget_extra_bytes();
+    if (extra) {
+        int budget = rt_patch_set("shadow_budget");
+        int global = rt_patch_set("shadow_global");
+        uint8_t *page = rt_patch_page();
+        const char *pool = cfg_get("TOTK_APP_POOL");
+        if (budget < 0 || global < 0 || !page || (pool && *pool))
+            rt_fatal("shadow budget test: game patch sites unavailable or TOTK_APP_POOL overrides the shared budget");
+        uint32_t size = 0x10c00000u + extra;  // game's 268 MiB pool plus 180 MiB
+        memcpy(page + 80, &size, sizeof size);
+        rt_patch_switch(budget, 1);
+        rt_patch_switch(global, 1);
+        rt_log("shadow budget test: application +180 MiB, GlobalHeap +180 MiB, game GPU pool 268 -> 448 MiB, shadow storage truthful");
+    }
     // The map costs the game nothing: nvn_api_obj.c reports its storage as the 1024 map's, which is all the game
     // needs to know about a depth target the CPU never reads (storage_size_for_game, and why growing the game's
     // memory pool instead was wrong).
@@ -355,11 +503,18 @@ void res_fov_live(void) {
 }
 
 void res_wanted(unsigned out[2]) {
+    sv_host_decide();
+    if (SVHost.requested) { out[0] = SVHost.w, out[1] = SVHost.h; return; }
     decide();
     out[0] = R.ow, out[1] = R.oh;
 }
 
 void res_sizes(unsigned out[2], unsigned scene[2]) {
+    if (SVHost.active) {
+        out[0] = scene[0] = SVHost.w;
+        out[1] = scene[1] = SVHost.h;
+        return;
+    }
     decide();
     out[0] = R.on ? R.ow : BASE_W, out[1] = R.on ? R.oh : BASE_H;
     scene[0] = R.on ? R.sw : SCENE_W, scene[1] = R.on ? R.sh : SCENE_H;

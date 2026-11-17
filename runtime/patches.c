@@ -21,6 +21,7 @@
 #if __has_include("patches.h")
 #include "patches.h"
 #endif
+
 #ifndef RT_PATCH_COUNT
 #define RT_PATCH_COUNT 0
 #endif
@@ -57,6 +58,7 @@ void rt_patches_init(void) {
     lod_init();        // lod.c: the LOD bias of set lod_bias
     data_watch_init(); // data_watch.c: the host entry of set data_watch (before hostfn_seal)
     lua_mod_init();    // lua_mod.c: the host entry of set lua_mod (before hostfn_seal)
+    res_sv_wide_init(); // resolution.c: perspective camera aspect at ultrawide output
 #endif
 }
 

@@ -46,7 +46,7 @@ def fetch(url, digest, filename):
                 return target
     temp = target.with_suffix('.download')
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'KarPur-AppImage/0.3.8.1'}), timeout=90) as response, temp.open('wb') as f:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'KarPur-AppImage/0.4.0'}), timeout=90) as response, temp.open('wb') as f:
             shutil.copyfileobj(response, f)
         with temp.open('rb') as f:
             if hashlib.file_digest(f, 'sha256').hexdigest() != digest:
@@ -130,10 +130,20 @@ def prepare_portable():
     license_dir.mkdir(parents=True, exist_ok=True)
     for package in ('libopus-dev', 'libvpx-dev', 'libzstd-dev', 'libvulkan-dev', 'ninja-build', 'libclang-rt-18-dev'):
         copy_missing(Path('/usr/share/doc') / package / 'copyright', license_dir / (package + '-copyright'))
-    for name in ('clang', 'llvm-ar'):
+    wrappers = {
+        'clang': '#!/bin/sh\ntool_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+                 'for argument in "$@"; do\n'
+                 '    case "$argument" in\n'
+                 '        *.cpp|*.cc|*.cxx) exec "$tool_dir/../../zig/zig" cc -target x86_64-linux-gnu -lc++ "$@" ;;\n'
+                 '    esac\n'
+                 'done\n'
+                 'exec "$tool_dir/../../zig/zig" cc -target x86_64-linux-gnu "$@"\n',
+        'llvm-ar': '#!/bin/sh\ntool_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+                   'exec "$tool_dir/../../zig/zig" ar "$@"\n',
+    }
+    for name, body in wrappers.items():
         wrapper = ninja.parent / name
-        if not wrapper.is_file():
-            raise RuntimeError(f'Portable compiler wrapper missing: {wrapper}')
+        wrapper.write_text(body, encoding='ascii')
         wrapper.chmod(0o755)
 
 
@@ -217,9 +227,9 @@ def main():
             add_file(z, ROOT / name, name)
         add_file(z, ROOT / 'toolchain' / 'sdl-src' / 'SDL3-3.4.20' / 'LICENSE.txt', 'toolchain/linux/SDL3-LICENSE.txt')
     (publish / 'START-HERE.txt').write_text(
-        'KarPur Linux: Starte ./KarPur-Launcher-Linux aus diesem vollständig entpackten Ordner.\n'
-        'payload.zip muss direkt neben der Programmdatei liegen. Einzelne Dateien reichen nicht.\n'
-        'Alternativ die separate .AppImage-Datei direkt starten.\n', encoding='utf-8')
+        'KarPur Linux: run ./KarPur-Launcher-Linux from this fully extracted folder.\n'
+        'Keep payload.zip next to the executable; a single copied file is not enough.\n'
+        'Alternatively, launch the separate .AppImage file directly.\n', encoding='utf-8')
     run(publish / 'KarPur-Launcher-Linux', '--self-check', '--require-payload')
     folder_archive = DIST / 'KarPur-Launcher-Linux-x86_64.tar.gz'
     with tarfile.open(folder_archive, 'w:gz') as tar:
@@ -247,7 +257,7 @@ def main():
     with image.open('rb') as f:
         digest = hashlib.file_digest(f, 'sha256').hexdigest()
     image.with_suffix('.AppImage.sha256').write_text(f'{digest}  {image.name}\n', encoding='ascii')
-    deck_image = DIST / 'KarPur-Linux-Launcher-0.3.8.AppImage'
+    deck_image = DIST / 'KarPur-Linux-Launcher-0.4.0.AppImage'
     shutil.copy2(image, deck_image)
     deck_image.with_suffix('.AppImage.sha256').write_text(f'{digest}  {deck_image.name}\n', encoding='ascii')
     print(f'AppImage built: {image} ({image.stat().st_size / 2**20:.1f} MiB)')

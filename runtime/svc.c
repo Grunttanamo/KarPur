@@ -13,6 +13,7 @@
 #include "platform/platform.h"
 
 #define R_OK 0u
+#define R_LIMIT_REACHED 0x10801u
 #define ST_FREE 0u
 #define ST_STACK 0xBu
 #define PERM_RW 3u
@@ -214,7 +215,34 @@ static void svc_body(Cpu *c, uint32_t imm, uint64_t pc) {
         x[1] = 0;
         return;
     }
-    case 0x2C: x[0] = mem_map_physical(x[0], x[1]); return;
+    case 0x2C: {   // MapPhysicalMemory: the SVC still has the guest CPU state needed for a useful backtrace.
+        uint64_t addr = x[0], size = x[1];
+        uint32_t result = mem_map_physical(addr, size);
+        x[0] = result;
+        if (!result && size >= (8ull << 20) && rt_knob("MEM_BUDGET_TRACE", "0")) {
+            static uint32_t large_maps;
+            uint32_t n = __atomic_add_fetch(&large_maps, 1, __ATOMIC_RELAXED);
+            if (n <= 64) {
+                char at[160];
+                rt_log("memory budget: physical map #%u %#llx+%#llx (%.1f MiB), caller %s",
+                       n, (unsigned long long)addr, (unsigned long long)size, size / 1048576.0,
+                       ldr_describe(pc, at, sizeof at));
+                kern_backtrace(c);
+            }
+        }
+        if (result == R_LIMIT_REACHED && rt_knob("MEM_LIMIT_TRACE", "0")) {
+            static uint64_t failures;
+            uint64_t n = __atomic_add_fetch(&failures, 1, __ATOMIC_RELAXED);
+            if (n <= 4 || !(n & (n - 1))) {   // the first failures, then sparse samples if the SDK retries
+                char at[160];
+                rt_log("memory limit trace #%llu: MapPhysicalMemory %#llx+%#llx at %s",
+                       (unsigned long long)n, (unsigned long long)addr, (unsigned long long)size,
+                       ldr_describe(pc, at, sizeof at));
+                kern_backtrace(c);
+            }
+        }
+        return;
+    }
     case 0x2D: x[0] = mem_unmap_physical(x[0], x[1]); return;
     case 0x26: {   // Break(x0 reason, x1 info, x2 info size); bit 31 of the reason: notification only
         uint32_t result = 0;

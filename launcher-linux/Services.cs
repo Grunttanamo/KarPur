@@ -248,28 +248,45 @@ static class Install
 
     public static void SaveSettings(string root, string fps, string window, bool handheld, string upscaler, string present, string overlay,
         bool fullscreen = false, string shadow = "0", string population = "switch", bool noExclusives = false,
-        bool noTradeEvo = false, string stutter = "off", int sharpness = 80, string gpu = "", bool safeSubmit = false)
+        bool noTradeEvo = false, string stutter = "off", int sharpness = 80, string gpu = "", bool safeSubmit = false,
+        bool fsr2 = false, bool fsr2Window = false, string peopleDetail = "1", string pokemonDetail = "1",
+        string peopleShown = "12", string ao = "0", string indirectLight = "0", bool keepHotMemory = false,
+        string outputRes = "1920x1080")
     {
         if (!File.Exists(Game(root))) throw new IOException("Select or create a Linux game installation first.");
         if (GameRunning) throw new IOException("Close the game before saving settings.");
         var ini = new Ini(Path.Combine(root, "build", "game", "karpur.ini"));
         ini.Set("frame rate", "fps_limit", fps);
         ini.Set("display", "window_size", window);
+        if (File.Exists(Path.Combine(root, "build", "svhost_supported.txt")) &&
+            File.ReadAllText(Path.Combine(root, "build", "svhost_supported.txt")).Trim() == "1")
+        {
+            ini.Set("display", "output_res", outputRes);
+            ini.Set("display", "svhost_test", "1");
+        }
         ini.Set("display", "fullscreen", fullscreen ? "1" : "0");
         ini.Set("display", "operation_mode", handheld ? "handheld" : "docked");
         ini.Set("display", "upscaler", upscaler);
+        ini.Set("display", "fsr2", fsr2 ? "1" : "0");
+        ini.Set("display", "fsr2_out", fsr2 && fsr2Window ? "window" : "game");
         ini.Set("display", "vk_present", present);
         ini.Set("display", "gpu_name", gpu);
         ini.Set("display", "gpu_index", "");
         ini.Set("display", "perf_overlay", overlay);
         ini.Set("display", "shadow_res", shadow);
         ini.Set("display", "population", population);
+        ini.Set("display", "people_detail", peopleDetail);
+        ini.Set("display", "pokemon_detail", pokemonDetail);
+        ini.Set("display", "people_shown", peopleShown);
+        ini.Set("display", "ao", ao);
+        ini.Set("display", "indirect_light", indirectLight);
         ini.Set("display", "no_exclusives", noExclusives ? "1" : "0");
         ini.Set("display", "no_trade_evo", noTradeEvo ? "1" : "0");
         ini.Set("display", "sharpness", sharpness.ToString());
         ini.Set("performance", "acquire_ahead", stutter == "off" ? "0" : "1");
         ini.Set("performance", "core_lazy", stutter == "aggressive" ? "1" : "0");
         ini.Set("compatibility", "submit_defer", safeSubmit ? "0" : "1");
+        ini.Set("compatibility", "hot_cool", keepHotMemory ? "0" : "300");
         ini.Save();
     }
 

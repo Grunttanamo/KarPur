@@ -5,7 +5,7 @@
 
 **Pokémon Scarlet & Violet, recompiled into a native PC game.**
 
-*Real Windows x86-64 code with a Vulkan renderer, built on your own PC from your own copy of the game. Not an emulator.*
+*Native Windows and experimental Linux x86-64 builds with a Vulkan renderer, built on your own PC from your own copy of the game. Not an emulator.*
 
 [Download the launcher](https://github.com/Grunttanamo/KarPur/releases) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
 
@@ -19,11 +19,7 @@
 > Everything is built from your files, on your PC, for your own use. Do not share it.
 
 > [!IMPORTANT]
-> **A few quick fixes if you get some problems**
-> 1. Activate "Compatibily Mode" in the Settings Tab
-> 2. Paste this line in karpur.ini -> hot_cool = 0
-> 3. Activate Resizable Bar on your System - this will mostly fix the most Problems
-> - Try one or all at the same and see what quick fix makes a different
+> **If the game crashes, try the two independent Compatibility switches in Settings.** The original mode changes GPU submission timing; **Keep hot memory active** sets `hot_cool = 0` and can be turned off again. On supported desktop PCs, enabling Resizable BAR may also improve performance; see the [launcher guide](docs/launcher.md#die-tabs) for the general UEFI/BIOS steps. Results vary by system.
 
 > [!IMPORTANT]
 > **AMD GPU owners and Vulkan people wanted.** The remaining AMD-specific bugs (a crash on some RDNA 3 cards during
@@ -35,11 +31,12 @@
 
 ## What is KarPur?
 
-KarPur is a fan project. It takes the ARM64 code of *Pokémon Scarlet & Violet* (Nintendo Switch, 2022) and translates it into C code, which it compiles into a Windows program. The Switch system and its graphics API are replaced by a runtime of our own, and the game draws its pictures through Vulkan.
+KarPur is a fan project. It takes the ARM64 code of *Pokémon Scarlet & Violet* (Nintendo Switch, 2022) and translates it into C code, which it compiles into a native Windows or Linux program. The Switch system and its graphics API are replaced by a runtime of our own, and the game draws its pictures through Vulkan.
 
 In practice that means:
 - a steady **60 FPS**
 - **DLSS, DLAA and Frame Generation**
+- **FSR 2**, adjustable internal render resolution and screen-space lighting
 - **keyboard and mouse**
 - **more wild Pokémon**
 
@@ -64,7 +61,7 @@ You also need **`prod.keys`** from the same console.
 
 | | |
 |---|---|
-| **System** | Windows 10 or 11, 64-bit |
+| **System** | Windows 10 or 11, 64-bit; experimental x86-64 Linux with glibc 2.38 or newer |
 | **Graphics card** | Vulkan 1.3 with a current driver. DLSS, DLAA and Frame Generation need an NVIDIA RTX card |
 | **Processor** | 64-bit x86 with AVX2 (most CPUs from 2015 on). Older CPUs get a build of their own automatically; how well the game runs on them is still being tested: reports are very welcome |
 | **Memory** | 16 GB RAM recommended |
@@ -77,7 +74,7 @@ You also need **`prod.keys`** from the same console.
 | | Platform | Status |
 |---|---|---|
 | 🟢 | Windows 10 / 11 | Tested (Ryzen 7 9800X3D, RTX 5080) |
-| 🧪 | Linux, Steam Deck | Experimental native AppImage launcher. Some scenery may be missing and performance may vary; Linux/Vulkan reports and pull requests are welcome. See [Linux launcher guide](docs/launcher-linux.md) |
+| 🧪 | Linux, Steam Deck | Experimental native AppImage launcher that builds the game locally. Scenery, text entry and performance still need wider Linux testing; Linux/Vulkan reports and pull requests are welcome. See [Linux launcher guide](docs/launcher-linux.md) |
 
 ## Status
 
@@ -88,14 +85,14 @@ You also need **`prod.keys`** from the same console.
 | ✅ | M0-M3 | Foundation, tools, the code translator, first sign of life |
 | ✅ | M4 | First picture through Vulkan |
 | ✅ | M5 | Playable |
-| 🔄 | **M6** | **PC extras**: 60 FPS ✅, DLSS / DLAA / Frame Generation ✅, launcher ✅, settings ✅, shader pre-build ✅, DLC ✅, a real AMD/weaker-GPU option (FSR 1 + Handheld mode) ✅, shadow quality ✅, draw distance |
+| 🔄 | **M6** | **PC extras**: 60 FPS ✅, DLSS / DLAA / Frame Generation ✅, FSR 2 ✅, launcher ✅, settings ✅, shader pre-build ✅, DLC ✅, render scale ✅, shadow quality ✅, detail and population controls ✅; further Linux and graphics polish remains |
 
 Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](docs/progress.md)
 
 ## Features
 
 ### 🎮 Smooth play
-- **60 FPS**, with the game's speed kept right, smooth effects and smooth walking indoors. 90, 120 and 144 FPS are available as experimental limits.
+- **60 FPS**, with the game's speed kept right, smooth effects and smooth walking indoors. Stay at 60 FPS for normal play: limits above 60 can break battle transitions and visual effects ([#85](https://github.com/Grunttanamo/KarPur/issues/85)).
 - **Stutter reduction** (Settings tab, off by default, experimental): two contributed changes (#49, #53) that let a
   window image be acquired again at its display time and let threads run without a virtual core until they ask for
   their core number. Measured as an improvement in play, but new, so they stay off until more people have tried them.
@@ -105,7 +102,10 @@ Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](doc
 - **NVIDIA DLAA**: smooth edges in the 3D world, at about 1 ms per frame.
 - **NVIDIA DLSS**: the 3D world is rendered at your window's size, or at 4K and then scaled down.
 - **DLSS Frame Generation**: 2× on RTX 40, up to 4× on RTX 50 cards. It needs Windows' hardware-accelerated GPU scheduling.
-- NVIDIA's files are not part of KarPur: you add your own copies (from any game that ships DLSS) in the launcher.
+- NVIDIA's files are not bundled. The launcher can download `nvngx_dlss.dll` from NVIDIA on request, or you can provide your own copy. Frame Generation needs the separate supported Streamline files.
+- **AMD FSR 2**: temporal anti-aliasing or window-sized upscaling on Vulkan, included with KarPur. Moving characters and effects can leave trails until their own motion is tracked.
+- **Render scale**: internal image sizes from 800×450 to 3840×2160, independent of the window size. Wide, tall and portrait formats are experimental; their UI, visibility and character framing still need work. Fullscreen uses the monitor size.
+- **Ambient occlusion** and **Indirect light**: separate Off/Low/Medium/High settings for contact shading and screen-space colour bounce.
 - **AMD FSR 1** or bilinear scaling, with sharpness, when DLSS is off. The console's own **Handheld mode** (1280×720,
   a real speed gain) is selectable too, next to the usual Docked (1920×1080) — a genuine performance option for AMD
   and other non-NVIDIA cards, no reverse engineering required.
@@ -115,7 +115,7 @@ Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](doc
   4096×4096, which removes most of the jagged edges on shadows, and **Disabled** skips the shadow pass completely.
   It costs the game no memory: the map is reported to the game as the original size, so nothing is taken from the
   streaming it does for NPCs and wild Pokémon.
-- The HUD always stays as the game draws it.
+- At non-16:9 render scales, the HUD stays in a centred 16:9 area; some screens still need layout work.
 
 ### 🌿 A livelier Paldea
 **More wild Pokémon**, in four levels. The setting takes effect after a restart.
@@ -128,6 +128,8 @@ Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](doc
 | Extreme | 120 | screenshots; can drop to about 35 FPS |
 
 Switch 2 uses the spawn values of the fan mod [Pokémon Compass](https://compass.seri.studio) by Aria Seri and Kas Seri. The higher levels only raise the count. KarPur contains these numbers, none of the mod's files.
+
+**People detail** and **Pokémon detail** can keep models at full detail farther away, up to 80 m. **Town people shown** offers the game's 12 or 24, 36 and 48 at once. Higher choices can increase memory pressure, so lower them if buildings or characters disappear.
 
 **No version exclusives** (off by default): the wild Pokémon that are exclusive to the other edition spawn in yours
 as well — 66 spawn entries across Paldea, Kitakami and the Blueberry Academy, including the version-split paradox
@@ -155,21 +157,21 @@ in the data your own copy of the game already contains; KarPur adds none.
 - **One file**: no installation and no administrator rights.
 - **Home**: a start page in your edition's colours, with Play, the state of your build, your last save and **your current team** (name and level, read when the game saves) at a glance.
 - **Setup**: builds the game from your dumps, shaders included. A stopped build goes on where it stopped.
-- **Settings**: everything from fullscreen and your graphics card to Frame Generation, shadow quality, how many wild Pokémon appear and the two Pokémon settings above, before you start the game.
+- **Settings**: fullscreen, window size, Render scale, GPU choice, DLSS/FSR 2, lighting, shadows, population, detail distance and two independent compatibility switches.
 - **Controls**: keyboard, mouse and controller, with swapped sticks and an inverted camera.
 - **Saves**: export your save as a `.zip`, import one, open its folder, or restore one of the last saves.
-- **Mods** (experimental, only a few mods tried so far): add your own mods (a folder or a `.zip`, for example from NexusMods) and switch each on or off. Nothing of your game is replaced: KarPur gives the game a mod's file as it loads the original. Mods that only change files work; files a mod adds and a mod's code (`exefs`) are not supported yet, and the tab says so per mod.
+- **Mods** (experimental, only a few mods tried so far): add your own mods (a folder or a `.zip`, for example from NexusMods) and switch each on or off. Nothing of your game is replaced: KarPur gives the game a mod's file as it loads the original. The tab follows `mod_files` in the game's settings and offers optional size and BNTX filters for large texture packs. Files a mod adds and a mod's code (`exefs`) are not supported yet.
 - **Repair** and **Update**: only what changed is rebuilt. Your saves and settings stay.
 - **Feedback**: a ready-made report about your system for a GitHub issue.
 
 ## Getting started
 
-1. **Download** `KarPur-Launcher.exe` from the [releases page](https://github.com/Grunttanamo/KarPur/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*.
+1. **Download** `KarPur-Launcher.exe` for Windows or `KarPur-Linux-Launcher-0.4.0.AppImage` for Linux from the [releases page](https://github.com/Grunttanamo/KarPur/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
 2. **Choose your files** in the *Setup* tab:
    - the base game (`.xci`, or an eShop `.nsp` together with a *Firmware folder*)
    - the update and DLC (`.nsp`)
    - `prod.keys`
-   - a **target folder without spaces**
+   - a target folder with at least 30 GB free; spaces in its path are supported
 3. **Press Build.** The first build takes about 30-60 minutes and keeps your PC busy:
    - the launcher downloads Python and the compiler from their official sources
    - it translates the game's code
@@ -178,6 +180,9 @@ in the data your own copy of the game already contains; KarPur adds none.
 4. **Play**: press *Play*, or use the shortcut **Pokémon Violet (KarPur)** that the launcher puts into your target folder.
 
 Your dumps, your keys and the built game stay on your PC. A guide in German is in [docs/launcher.md](docs/launcher.md). If you want to do everything by hand, see [docs/setup-windows.en.md](docs/setup-windows.en.md) ([Deutsch](docs/setup-windows.md)).
+
+> [!IMPORTANT]
+> **For a new game, keep Render scale at 1920×1080 until character creation is complete.** The character preview and ID photo can be misplaced or missing at other internal resolutions. After finishing character creation, change Render scale to your preferred size and restart the game. This is a temporary workaround while the capture and layout are fixed.
 
 ## Troubleshooting
 
@@ -232,13 +237,13 @@ You add a few words, and with *Attach log* the end of the game's log. **Open on 
 
 ## Known limits
 
-- The game renders at 1920 × 1080; DLSS gives a sharper picture at higher window sizes. A higher native resolution is not done yet.
+- Render scale changes the game's internal output resolution. The character creation preview and ID photo are currently reliable at 1920×1080; switch scales after creating your character. Wide, tall and portrait layouts remain experimental.
 - Online features (Union Circle, trading, Tera Raid matchmaking) are not available. The evolutions that would need
   a trade have an offline route instead (**No trade evolutions** in Settings); four of them take a level rather
   than their own item, because the game cannot name those items in an evolution condition.
 - DLC is confirmed to work, including the story expansions.
-- Draw distance settings for trees, grass, Pokémon and NPCs are not done yet.
-- No temporal AMD upscaler (FSR 2) or frame generation yet; FSR 1 plus Handheld mode is the real performance option for now.
+- People and Pokémon detail distance and the number of town people are configurable. Tree and grass visibility still follows the game's own streaming and culling decisions.
+- FSR 2 is available; there is no general AMD frame-generation option yet. Linux rendering remains experimental, with open texture and text-entry reports.
 
 ## How it works
 

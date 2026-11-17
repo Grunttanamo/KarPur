@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -26,16 +27,24 @@ partial class MainForm : Form
     };
     // Settings
     readonly CheckBox fullscreen = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, Text = "Start in fullscreen", BackColor = Theme.Card };
+    readonly Label windowSizeNote = Theme.Label(
+        "Window size applies in windowed mode. Fullscreen uses the monitor; Render scale sets the game's image size.",
+        9.5f, muted: true);
+    readonly Label renderScaleNote = Theme.Label(
+        "New game: keep 1920 x 1080 through character creation, then choose another Render scale and restart. Other sizes can misplace the preview and ID photo.",
+        9.5f, muted: true);
     // submit_defer = 0: every GPU submission goes out at once. Players whose game crashed after the character creation
     // reported that TOTK_SUBMIT_DEFER=0 fixes it; far trees may flicker a little and the frame rate can drop.
     readonly CheckBox safeSubmit = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Card,
                                            Text = "Compatibility mode (try it if the game crashes after the character creation)" };
+    readonly CheckBox keepHotMemory = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Card,
+                                           Text = "Keep hot memory active (try if compatibility mode does not help)" };
     readonly CheckBox noExclusives = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Card,
                                            Text = "No version exclusives (the other edition's wild Pokémon spawn here too)" };
     readonly CheckBox noTradeEvo = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Card,
                                            Text = "No trade evolutions (they evolve on a level, holding the item they needed if there was one)" };
-    readonly ComboBox windowSize = Combo(), fpsLimit = Combo(), present = Combo(), upscaler = Combo(), overlay = Combo(),
-                      population = Combo(), colour = Combo(), antiAliasing = Combo(), dlssModel = Combo(), frameGen = Combo(),
+    readonly ComboBox windowSize = Combo(), renderScale = Combo(), fpsLimit = Combo(), present = Combo(), upscaler = Combo(), overlay = Combo(),
+                      population = Combo(), peopleShown = Combo(), peopleDetail = Combo(), pokemonDetail = Combo(), ao = Combo(), indirectLight = Combo(), colour = Combo(), antiAliasing = Combo(), dlssModel = Combo(), frameGen = Combo(),
                       gpu = Combo(), opMode = Combo(), shadowRes = Combo(), stutter = Combo();
     readonly Label gpuNote = Theme.Label("", 9.5f, muted: true);
     readonly Dictionary<Control, Label> rowLabels = new();
@@ -46,7 +55,24 @@ partial class MainForm : Form
         + "objects. Standard starts the next frame earlier; Aggressive also lets threads share the "
         + "processor cores more freely, which the console does not do. Leave this off if anything looks "
         + "wrong.", 9.5f, muted: true);
-    readonly Button addDlss = Theme.Button("Add nvngx_dlss.dll", glyph: Theme.GlyphFolder);
+    readonly Label modelDetailNote = Theme.Label(
+        "Minimum full-detail distance. An active LOD mod may already use a larger distance. This does not change spawning.",
+        9.5f, muted: true);
+    readonly Label peopleShownNote = Theme.Label(
+        "How many static town people can have models at once. Higher counts may need more memory.",
+        9.5f, muted: true);
+    readonly Label lightingNote = Theme.Label(
+        "Screen-space effects on the GPU. They can cost frame time; the game's memory pools stay unchanged.",
+        9.5f, muted: true);
+    readonly Label compatibilityNote = Theme.Label(
+        "Keep hot memory active sets hot_cool = 0; turning it off restores 300. It may reduce performance over longer play.",
+        9.5f, muted: true);
+    readonly Label resizableBarNote = Theme.Label(
+        "Resizable BAR can improve KarPur performance on supported PCs. In your motherboard's UEFI/BIOS, enable "
+        + "Above 4G Decoding and Re-Size BAR (sometimes Smart Access Memory), then restart. Use UEFI boot; "
+        + "check NVIDIA Control Panel > System Information > Resizable BAR: Yes. Menu names vary by motherboard.",
+        9.5f, muted: true);
+    readonly Button addDlss = Theme.Button("Download DLSS from NVIDIA", glyph: Theme.GlyphSetup);
     readonly Label dlssNote = Theme.Label("", 9.5f, muted: true);
     readonly TrackBar sharpness = new FocusSlider { Minimum = 0, Maximum = 100, TickFrequency = 10, Width = 280, BackColor = Theme.Card };
     readonly Label sharpnessValue = Theme.Label("80");
@@ -76,7 +102,25 @@ partial class MainForm : Form
     // Values the game's PC settings use (runtime/cfg.c), with the names shown here.
     static readonly (string Value, string Name)[] Sizes =
         { ("1280x720", "1280 × 720"), ("1600x900", "1600 × 900"), ("1920x1080", "1920 × 1080"), ("2560x1440", "2560 × 1440"),
-          ("3840x2160", "3840 × 2160") };
+          ("3840x2160", "3840 × 2160"), ("2560x1080", "2560 × 1080 (21:9)"),
+          ("3440x1440", "3440 × 1440 (21:9)"), ("5120x1440", "5120 × 1440 (32:9)"),
+          ("960x720", "960 × 720 (4:3)"), ("1440x1080", "1440 × 1080 (4:3)"),
+          ("1200x800", "1200 × 800 (3:2)"), ("1620x1080", "1620 × 1080 (3:2)"),
+          ("1280x800", "1280 × 800 (16:10)"), ("1920x1200", "1920 × 1200 (16:10)"),
+          ("720x1280", "720 × 1280 (9:16)"), ("1080x1920", "1080 × 1920 (9:16)") };
+    // The game draws its 3D scene and UI at this size, then presents it in the separately chosen window size.
+    // 1080p is the game's original mode; the other sizes use host-owned render targets without growing its GPU pool.
+    static readonly (string Value, string Name)[] RenderScales =
+        { ("800x450", "450p (800 × 450)"), ("854x480", "480p (854 × 480)"), ("1280x720", "720p (1280 × 720)"),
+          ("1920x1080", "1080p (original)"), ("2560x1440", "1440p (2560 × 1440)"),
+          ("3840x2160", "2160p / 4K (3840 × 2160)"),
+          ("2560x1080", "21:9 (2560 × 1080, experimental)"),
+          ("3440x1440", "21:9 (3440 × 1440, experimental)"),
+          ("5120x1440", "32:9 (5120 × 1440, experimental)"),
+          ("1440x1080", "4:3 (1440 × 1080, experimental)"),
+          ("1620x1080", "3:2 (1620 × 1080, experimental)"),
+          ("1920x1200", "16:10 (1920 × 1200, experimental)"),
+          ("1080x1920", "9:16 (1080 × 1920, experimental)") };
     static readonly (string, string)[] Fps =
         { ("30", "30"), ("40", "40"), ("45", "45"), ("60", "60 (recommended)"), ("90", "90 (experimental)"),
           ("120", "120 (experimental)"), ("144", "144 (experimental)"), ("display", "Display refresh rate (experimental)") };
@@ -86,8 +130,9 @@ partial class MainForm : Form
     // 3D scene at the window's size (or at 4K, scaled down to the window: supersampling). DLSS turns DLAA on with it.
     static readonly (string, string)[] Upscalers =
         { ("fsr", "AMD FSR 1"), ("bilinear", "Bilinear"), ("dlss", "NVIDIA DLSS (to the window size)"),
-          ("dlss4k", "NVIDIA DLSS 4K (supersampling)") };
-    static readonly (string, string)[] AntiAliasings = { ("0", "Game's own"), ("1", "NVIDIA DLAA (RTX)") };
+          ("dlss4k", "NVIDIA DLSS 4K (supersampling)"), ("fsr2", "AMD FSR 2 (to window)") };
+    static readonly (string, string)[] AntiAliasings =
+        { ("0", "Game's own"), ("1", "NVIDIA DLAA (RTX)"), ("2", "AMD FSR 2") };
     static readonly (string, string)[] FrameGens =
         { ("0", "Off"), ("2", "2x (DLSS Frame Generation)"), ("3", "3x (RTX 50)"), ("4", "4x (RTX 50)") };
     static readonly (string, string)[] GpuAuto = { ("", "Automatic (best card)") };
@@ -95,14 +140,24 @@ partial class MainForm : Form
     // lower-resolution mode, a real speed gain confirmed by the maintainer, no reverse engineering needed.
     static readonly (string, string)[] OperationModes =
         { ("docked", "Docked (1920x1080, full quality)"), ("handheld", "Handheld (1280x720, saves performance)") };
-    // TOTK_RENDER_SCALE exists in cfg.c/resolution.c but is not wired into Violet/Scarlet's own code yet (see
-    // progress.md): no launcher row for it until it actually does something.
+    // The generic TOTK_RENDER_SCALE percentage does not control Violet's own targets; RenderScales above selects
+    // the actual output resolution through Violet's patch set.
     static readonly (string, string)[] DlssModels =
         { ("5", "CNN (steady, recommended)"), ("11", "Transformer (sharper, can smear)") };
     static readonly (string, string)[] Overlays = { ("off", "Off"), ("fps", "FPS only"), ("full", "Full") };
     static readonly (string, string)[] Populations =
         { ("switch", "Switch (15, default)"), ("switch2", "Switch 2 (40)"), ("enhanced", "Enhanced (80)"),
           ("extreme", "Extreme (120, can lower the frame rate)") };
+    static readonly (string, string)[] PeopleShown =
+        { ("12", "Game's own (12)"), ("24", "24"), ("36", "36"), ("48", "48") };
+    static readonly (string, string)[] PeopleDetails =
+        { ("1", "Game's own (8 m)"), ("2", "16 m"), ("4", "32 m"), ("6", "48 m"),
+          ("8", "64 m"), ("10", "80 m") };
+    static readonly (string, string)[] PokemonDetails =
+        { ("1", "Game's own (10 m)"), ("2", "20 m"), ("4", "40 m"), ("6", "60 m"),
+          ("8", "80 m") };
+    static readonly (string, string)[] LightingLevels =
+        { ("0", "Off (default)"), ("1", "Low"), ("2", "Medium"), ("3", "High") };
     static readonly (string, string)[] Colours = { ("auto", "Automatic (from your game)"), ("violet", "Violet"), ("scarlet", "Scarlet") };
     // Two runtime switches behind one row (contributed in #49 and #53): both are off by default, and the
     // launcher writes both so a level is unambiguous. Power users can still set either on its own in the ini.
@@ -149,7 +204,7 @@ partial class MainForm : Form
         targetBox.TextChanged += (_, _) => Refresh_();
         sharpness.ValueChanged += (_, _) => sharpnessValue.Text = sharpness.Value.ToString();
         saveSettings.Click += (_, _) => SaveGameSettings();
-        addDlss.Click += (_, _) => AddDlss();
+        addDlss.Click += async (_, _) => await DownloadDlss();
         addStreamline.Click += (_, _) => AddStreamline();
         frameGen.SelectedIndexChanged += (_, _) =>
         {
@@ -159,11 +214,12 @@ partial class MainForm : Form
         };
         antiAliasing.SelectedIndexChanged += (_, _) =>
         {
-            // without DLAA there is no DLSS upscaling and no frame generation
-            if (!loadingGame && Value(antiAliasing) == "0")
+            if (!loadingGame)
             {
-                if (Value(upscaler).StartsWith("dlss")) Select(upscaler, "fsr", "fsr");
-                Select(frameGen, "0", "0");
+                string aa = Value(antiAliasing);
+                if (aa != "1" && Value(upscaler).StartsWith("dlss")) Select(upscaler, "fsr", "fsr");
+                if (aa != "2" && Value(upscaler) == "fsr2") Select(upscaler, "fsr", "fsr");
+                if (aa != "1") Select(frameGen, "0", "0");
             }
             DlssStatus();
             UpdateRows();
@@ -171,6 +227,7 @@ partial class MainForm : Form
         upscaler.SelectedIndexChanged += (_, _) =>
         {
             if (!loadingGame && Value(upscaler).StartsWith("dlss")) Select(antiAliasing, "1", "0");
+            if (!loadingGame && Value(upscaler) == "fsr2") Select(antiAliasing, "2", "0");
             if (!loadingGame && !Value(upscaler).StartsWith("dlss")) Select(frameGen, "0", "0");   // frame generation needs DLSS's window-sized picture
             UpdateRows();
         };
@@ -290,7 +347,12 @@ partial class MainForm : Form
         if (name == "Home") { RefreshHome(); WatchTeam(); }
         if (name == "Saves") RefreshSaves();
         if (name == "Mods") LoadMods();
-        if (name == "Settings") LoadGameSettings();
+        if (name == "Settings") {
+            LoadGameSettings();
+            // Loading the saved controls can focus a low row before the page finishes laying out.
+            BeginInvoke(() => { if (currentPage == "Settings" && pages[name].Page is ScrollableControl settings)
+                settings.AutoScrollPosition = Point.Empty; });
+        }
         if (name == "Controls") LoadControls();
         if (name == "Feedback") _ = FillFeedback();
         PadMarkSidebar();
@@ -328,13 +390,13 @@ partial class MainForm : Form
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        FileRow(grid, "Base game (.xci)", baseBox, () => PickFile(baseBox, "Base game as XCI|*.xci|Base game as NSP (needs a firmware folder)|*.nsp"));
+        FileRow(grid, "Base game (.xci or .nsp)", baseBox, () => PickFile(baseBox, "Base game (*.xci;*.nsp)|*.xci;*.nsp|XCI cartridge dump|*.xci|NSP base game (needs firmware)|*.nsp"));
         FileRow(grid, "Update (.nsp)", updateBox, () => PickFile(updateBox, "Update as NSP|*.nsp"));
         FileRow(grid, "DLC (.nsp, optional)", dlcBox, () => PickFile(dlcBox, "DLC as NSP|*.nsp"));
         FileRow(grid, "prod.keys", keysBox, () => PickFile(keysBox, "Keys|*.keys|All files|*.*"));
         // Optional: the console's system NCAs for the shared fonts, when the base game is an NSP or an XCI converted from
         // one, which lacks them (issue #18).
-        FileRow(grid, "Firmware folder (optional)", firmwareBox, PickFirmware);
+        FileRow(grid, "Firmware folder (NSP or converted XCI)", firmwareBox, PickFirmware);
         FileRow(grid, "Target folder", targetBox, PickFolder);
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, BackColor = Theme.Card, Margin = new Padding(0) };
@@ -376,6 +438,7 @@ partial class MainForm : Form
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         Fill(windowSize, Sizes);
+        Fill(renderScale, RenderScales);
         Fill(fpsLimit, Fps);
         Fill(present, Presents);
         Fill(upscaler, Upscalers);
@@ -386,6 +449,11 @@ partial class MainForm : Form
         Fill(frameGen, FrameGens);
         Fill(overlay, Overlays);
         Fill(population, Populations);
+        Fill(peopleShown, PeopleShown);
+        Fill(peopleDetail, PeopleDetails);
+        Fill(pokemonDetail, PokemonDetails);
+        Fill(ao, LightingLevels);
+        Fill(indirectLight, LightingLevels);
         Fill(colour, Colours);
         Fill(shadowRes, ShadowReses);
         Fill(stutter, Stutters);
@@ -395,6 +463,12 @@ partial class MainForm : Form
         sharp.Controls.Add(sharpnessValue);
         SettingRow(grid, "Display", fullscreen);
         SettingRow(grid, "Window size", windowSize);
+        fullscreen.CheckedChanged += (_, _) => windowSize.Enabled = saveSettings.Enabled && !fullscreen.Checked;
+        windowSizeNote.MaximumSize = new Size(560, 0);
+        SettingRow(grid, "", windowSizeNote);
+        SettingRow(grid, "Render scale", renderScale);
+        renderScaleNote.MaximumSize = new Size(560, 0);
+        SettingRow(grid, "", renderScaleNote);
         SettingRow(grid, "FPS limit", fpsLimit);
         SettingRow(grid, "Frame sync", present);
         SettingRow(grid, "Graphics card", gpu);
@@ -425,7 +499,21 @@ partial class MainForm : Form
         SettingRow(grid, "", fgNote);
         SettingRow(grid, "Performance overlay", overlay);
         SettingRow(grid, "Shadow quality", shadowRes);
+        SettingRow(grid, "Ambient occlusion", ao);
+        SettingRow(grid, "Indirect light", indirectLight);
+        lightingNote.MaximumSize = new Size(560, 0);
+        lightingNote.AutoSize = true;
+        SettingRow(grid, "", lightingNote);
         SettingRow(grid, "Wild Pokémon", population);
+        SettingRow(grid, "People shown", peopleShown);
+        peopleShownNote.MaximumSize = new Size(560, 0);
+        peopleShownNote.AutoSize = true;
+        SettingRow(grid, "", peopleShownNote);
+        SettingRow(grid, "People detail", peopleDetail);
+        SettingRow(grid, "Pokémon detail", pokemonDetail);
+        modelDetailNote.MaximumSize = new Size(560, 0);
+        modelDetailNote.AutoSize = true;
+        SettingRow(grid, "", modelDetailNote);
         SettingRow(grid, "", noExclusives);
         SettingRow(grid, "", noTradeEvo);
         SettingRow(grid, "Stutter reduction", stutter);
@@ -433,6 +521,13 @@ partial class MainForm : Form
         stutterNote.AutoSize = true;
         SettingRow(grid, "", stutterNote);
         SettingRow(grid, "Compatibility", safeSubmit);
+        SettingRow(grid, "", keepHotMemory);
+        compatibilityNote.MaximumSize = new Size(560, 0);
+        compatibilityNote.AutoSize = true;
+        SettingRow(grid, "", compatibilityNote);
+        resizableBarNote.MaximumSize = new Size(560, 0);
+        resizableBarNote.AutoSize = true;
+        SettingRow(grid, "Resizable BAR", resizableBarNote);
         var look = Grid(2);
         look.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         look.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -483,14 +578,21 @@ partial class MainForm : Form
     {
         string name = Value(gpu);
         bool locked = name != "" && !name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase);
-        string curUp = Value(upscaler);
-        Fill(upscaler, locked ? Upscalers.Where(u => u.Item1 is "fsr" or "bilinear").ToArray() : Upscalers);
+        string curUp = Value(upscaler), curAa = Value(antiAliasing);
+        bool wasLoading = loadingGame;
+        loadingGame = true;
+        Fill(upscaler, locked ? Upscalers.Where(u => !u.Item1.StartsWith("dlss")).ToArray() : Upscalers);
         Select(upscaler, locked && curUp.StartsWith("dlss") ? "fsr" : curUp, "fsr");
-        if (locked && Value(antiAliasing) == "1") Select(antiAliasing, "0", "0");
+        Fill(antiAliasing, locked ? AntiAliasings.Where(a => a.Item1 != "1").ToArray() : AntiAliasings);
+        Select(antiAliasing, locked && curAa == "1" ? "0" : curAa, "0");
+        loadingGame = wasLoading;
         if (locked && Value(frameGen) != "0") Select(frameGen, "0", "0");
-        antiAliasing.Enabled = dlssModel.Enabled = frameGen.Enabled = addDlss.Enabled = addStreamline.Enabled = !locked;
+        bool built = targetBox.Text != "" && File.Exists(Builder.Exe(targetBox.Text));
+        antiAliasing.Enabled = built;
+        dlssModel.Enabled = frameGen.Enabled = addStreamline.Enabled = built && !locked;
+        addDlss.Enabled = built && !locked && !dlssDownloading;
         gpuNote.Text = locked
-            ? $"DLAA, DLSS and Frame Generation need an NVIDIA card: locked while \"{name}\" is selected above."
+            ? $"DLAA, DLSS and Frame Generation need an NVIDIA card: locked while \"{name}\" is selected above. AMD FSR 2 remains available."
             : "";
         UpdateRows();
     }
@@ -562,6 +664,9 @@ partial class MainForm : Form
         int i = Array.FindIndex(items, x => x.Value.Equals(value ?? fallback, StringComparison.OrdinalIgnoreCase));
         c.SelectedIndex = i >= 0 ? i : Math.Max(0, Array.FindIndex(items, x => x.Value == fallback));
     }
+
+    static string? CapDetailSetting(string? value, int maximum) =>
+        int.TryParse(value, out int saved) && saved > maximum ? maximum.ToString() : value;
 
     static string Value(ComboBox c) => ((string Value, string Name)[])c.Tag! is var items && c.SelectedIndex >= 0
         ? items[c.SelectedIndex].Value : "";
@@ -738,7 +843,7 @@ partial class MainForm : Form
     // Messages for what the player can fix before anything runs.
     string? CheckInputs()
     {
-        if (!File.Exists(baseBox.Text)) return "Please choose your base game (.xci).";
+        if (!File.Exists(baseBox.Text)) return "Please choose your base game (.xci or .nsp).";
         bool nsp = baseBox.Text.EndsWith(".nsp", StringComparison.OrdinalIgnoreCase);
         if (!baseBox.Text.EndsWith(".xci", StringComparison.OrdinalIgnoreCase) && !nsp)
             return "The base game must be an .xci file (or an .nsp together with a firmware folder).";
@@ -753,7 +858,6 @@ partial class MainForm : Form
             return "The DLC file was not found or is not an .nsp. Leave the field empty if you have no DLC.";
         if (!File.Exists(keysBox.Text)) return "Please choose your prod.keys.";
         if (targetBox.Text == "") return "Please choose a target folder.";
-        if (targetBox.Text.Contains(' ')) return "The target folder must not contain spaces (for example C:\\Games).";
         return null;
     }
 
@@ -839,6 +943,7 @@ partial class MainForm : Form
     {
         string exe = Builder.Exe(targetBox.Text);
         if (!File.Exists(exe)) return;
+        DisableOrphanedModList();
         var start = Builder.GameStartInfo(targetBox.Text);
         var game = Process.Start(start);
         if (game != null)
@@ -881,12 +986,16 @@ partial class MainForm : Form
         var ini = new Ini(built ? Builder.Ini(targetBox.Text) : "");
         fullscreen.Checked = (built ? ini.Get("fullscreen") : null) == "1";
         Select(windowSize, built ? ini.Get("window_size") : null, "1920x1080");
+        Select(renderScale, built ? ini.Get("output_res") : null, "1920x1080");
         Select(fpsLimit, built ? ini.Get("fps_limit") : null, "60");
         Select(present, built ? ini.Get("vk_present") : null, "mailbox");
         loadingGame = true;
-        Select(antiAliasing, built ? ini.Get("dlaa") : null, "0");
+        bool fsr2On = built && ini.Get("fsr2") == "1";
+        Select(antiAliasing, fsr2On ? "2" : built ? ini.Get("dlaa") : null, "0");
         string dlssOut = built ? ini.Get("dlss_out") ?? "game" : "game";
-        Select(upscaler, dlssOut == "window" ? "dlss" : dlssOut == "3840x2160" ? "dlss4k" : built ? ini.Get("upscaler") : null, "fsr");
+        Select(upscaler, fsr2On && ini.Get("fsr2_out") == "window" ? "fsr2"
+            : !fsr2On && dlssOut == "window" ? "dlss" : !fsr2On && dlssOut == "3840x2160" ? "dlss4k"
+            : built ? ini.Get("upscaler") : null, "fsr");
         Select(opMode, built ? ini.Get("operation_mode") : null, "docked");
         Select(dlssModel, built ? ini.Get("dlaa_preset") : null, "5");
         Select(frameGen, built ? ini.Get("framegen") : null, "0");
@@ -894,16 +1003,25 @@ partial class MainForm : Form
         UpdateRows();
         Select(overlay, built ? ini.Get("perf_overlay") : null, "off");
         Select(population, built ? ini.Get("population") : null, "switch");
+        Select(peopleShown, built ? CapDetailSetting(ini.Get("people_shown"), 48) : null, "12");
+        Select(peopleDetail, built ? CapDetailSetting(ini.Get("people_detail"), 10) : null, "1");
+        Select(pokemonDetail, built ? CapDetailSetting(ini.Get("pokemon_detail"), 8) : null, "1");
+        Select(ao, built ? ini.Get("ao") : null, "0");
+        Select(indirectLight, built ? ini.Get("indirect_light") : null, "0");
         Select(shadowRes, built ? ini.Get("shadow_res") : null, "0");
         string ahead = (built ? ini.Get("acquire_ahead") : null) ?? "0", lazy = (built ? ini.Get("core_lazy") : null) ?? "0";
         Select(stutter, lazy != "0" ? "aggressive" : ahead != "0" ? "standard" : "off", "off");
         safeSubmit.Checked = (built ? ini.Get("submit_defer") : null) == "0";
+        keepHotMemory.Checked = (built ? ini.Get("hot_cool") : null) == "0";
         noExclusives.Checked = (built ? ini.Get("no_exclusives") : null) == "1";
         noTradeEvo.Checked = (built ? ini.Get("no_trade_evo") : null) == "1";
         sharpness.Value = int.TryParse(built ? ini.Get("sharpness") : null, out int s) ? Math.Clamp(s, 0, 100) : 80;
-        foreach (Control c in new Control[] { fullscreen, windowSize, fpsLimit, present, opMode, upscaler, antiAliasing, addDlss, dlssModel, frameGen, addStreamline, overlay, population, noExclusives, noTradeEvo, shadowRes, stutter, safeSubmit, sharpness, saveSettings })
+        foreach (Control c in new Control[] { fullscreen, windowSize, fpsLimit, present, opMode, upscaler, antiAliasing, addDlss, dlssModel, frameGen, addStreamline, overlay, population, peopleShown, peopleDetail, pokemonDetail, ao, indirectLight, noExclusives, noTradeEvo, shadowRes, stutter, safeSubmit, keepHotMemory, sharpness, saveSettings })
             c.Enabled = built;
-        settingsNote.Text = built ? "" : "Build the game first: the settings belong to its folder.";
+        windowSize.Enabled = built && !fullscreen.Checked;
+        renderScale.Enabled = built && Builder.HasRenderScale(targetBox.Text);
+        settingsNote.Text = !built ? "Build the game first: the settings belong to its folder."
+            : !renderScale.Enabled ? "Render scale needs a Violet 4.0.0 build with the resolution patch." : "";
         DlssStatus();
         FgStatus();
         _ = DetectGpus(built ? Builder.Exe(targetBox.Text) : "", built ? ini.Get("gpu_name") : null);
@@ -971,14 +1089,25 @@ partial class MainForm : Form
         catch (Exception e) { settingsNote.Text = "Could not copy: " + e.Message; }
     }
 
-    // ---- NVIDIA DLAA: nvngx_dlss.dll is NVIDIA's and not part of KarPur; the player adds their own copy next to
-    // karpur.exe (from a game that ships it, or NVIDIA's DLSS SDK). The runtime loads it through the driver.
+    // NVIDIA's release DLL is fetched only when the player presses the button. It is not bundled with KarPur.
+    // Pin the version, size and SHA-256 together so a changed or incomplete download never replaces a working DLL.
+    const string DlssVersion = "310.9.16";
+    const string DlssUrl = "https://raw.githubusercontent.com/NVIDIA/DLSS/v310.9.16/lib/Windows_x86_64/rel/nvngx_dlss.dll";
+    const long DlssSize = 58956912;
+    const string DlssSha256 = "D00B5B0AB29C3CA101B70C3A5ECB3A01B7EF33766A3383A28A18623083E6123E";
+    bool dlssDownloading;
 
     string DlssPath() => Path.Combine(Path.GetDirectoryName(Builder.Exe(targetBox.Text))!, "nvngx_dlss.dll");
 
     void DlssStatus()
     {
+        if (dlssDownloading) return;
         if (targetBox.Text == "" || !File.Exists(Builder.Exe(targetBox.Text))) { dlssNote.Text = ""; return; }
+        if (Value(antiAliasing) == "2")
+        {
+            dlssNote.Text = "AMD FSR 2 is included with KarPur. Moving Pokémon, foliage and effects may leave trails until their motion is tracked separately.";
+            return;
+        }
         string dll = DlssPath();
         if (File.Exists(dll))
             dlssNote.Text = $"nvngx_dlss.dll {FileVersionInfo.GetVersionInfo(dll).FileVersion?.Replace(',', '.')} is in place. "
@@ -986,37 +1115,65 @@ partial class MainForm : Form
                           + "1080p, DLSS also sharpens the 3D world to that size (the HUD stays at 1080p).";
         else
             dlssNote.Text = Value(antiAliasing) == "1"
-                ? "DLAA needs NVIDIA's nvngx_dlss.dll, which KarPur cannot ship: add your own copy (games with DLSS have it). "
+                ? "DLAA needs NVIDIA's nvngx_dlss.dll. Download it with the button above. "
                   + "Without it the game starts with its own anti-aliasing."
-                : "NVIDIA DLAA needs an RTX card and NVIDIA's nvngx_dlss.dll (add your own copy).";
+                : "NVIDIA DLAA needs an RTX card and NVIDIA's nvngx_dlss.dll. Download it directly from NVIDIA above.";
     }
 
-    void AddDlss()
+    async Task DownloadDlss()
     {
-        using var dlg = new OpenFileDialog { Title = "Choose nvngx_dlss.dll", Filter = "NVIDIA DLSS|nvngx_dlss.dll" };
-        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        if (dlssDownloading || targetBox.Text == "" || !File.Exists(Builder.Exe(targetBox.Text))) return;
+        string destination = DlssPath();
+        var existing = File.Exists(destination) ? FileVersionInfo.GetVersionInfo(destination) : null;
+        if (existing != null && new Version(existing.FileMajorPart, existing.FileMinorPart, existing.FileBuildPart, existing.FilePrivatePart)
+            > new Version(310, 9, 16, 0))
+        {
+            dlssNote.Text = "A newer DLSS version is already installed. Kept that file.";
+            return;
+        }
+        string temporary = destination + "." + Guid.NewGuid().ToString("N") + ".download";
+        dlssDownloading = true;
+        addDlss.Enabled = false;
         try
         {
-            // a check against picking the wrong file, not a trust decision: the name in the Authenticode certificate
-            // (CreateFromSignedFile reads it without verifying the chain; .NET has no successor for signed files) and the
-            // file's own description; the NVIDIA driver loads and checks the DLL itself
-            string signer;
-#pragma warning disable SYSLIB0057
-            try { signer = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(dlg.FileName).Subject; }
-            catch { signer = ""; }
-#pragma warning restore SYSLIB0057
-            var info = FileVersionInfo.GetVersionInfo(dlg.FileName);
-            if (!signer.Contains("NVIDIA Corporation") || !(info.FileDescription ?? "").Contains("DLSS"))
+            dlssNote.Text = $"Downloading NVIDIA DLSS {DlssVersion} …";
+            using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("KarPur-Launcher/" + Program.Version);
+            using var response = await http.GetAsync(DlssUrl, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+            await using var source = await response.Content.ReadAsStreamAsync();
+            await using var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1024 * 1024, true);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            byte[] buffer = new byte[1024 * 1024];
+            long received = 0;
+            int shown = -5;
+            int count;
+            while ((count = await source.ReadAsync(buffer)) != 0)
             {
-                dlssNote.Text = "That file is not NVIDIA's signed nvngx_dlss.dll.";
-                return;
+                received += count;
+                if (received > DlssSize) throw new InvalidDataException("NVIDIA's download is larger than expected.");
+                hash.AppendData(buffer, 0, count);
+                await output.WriteAsync(buffer.AsMemory(0, count));
+                int percent = (int)(received * 100 / DlssSize);
+                if (percent >= shown + 5) { dlssNote.Text = $"Downloading NVIDIA DLSS {DlssVersion}: {percent}%"; shown = percent; }
             }
-            File.Copy(dlg.FileName, DlssPath(), true);
-            Select(antiAliasing, "1", "0");
+            await output.FlushAsync();
+            if (received != DlssSize || !Convert.ToHexString(hash.GetHashAndReset()).Equals(DlssSha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("NVIDIA's download did not match its pinned size and SHA-256. The existing DLL was kept.");
+            output.Close();
+            File.Move(temporary, destination, true);
+            dlssDownloading = false;
             DlssStatus();
-            settingsNote.Text = "Press Save settings to use DLAA.";
+            FgStatus();
+            settingsNote.Text = $"NVIDIA DLSS {DlssVersion} is ready. Choose DLAA or DLSS above and save settings to use it.";
         }
-        catch (Exception e) { dlssNote.Text = "Could not copy it: " + e.Message; }
+        catch (Exception e) { dlssNote.Text = "Could not download DLSS: " + e.Message; }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+            dlssDownloading = false;
+            UpdateGpuLock();
+        }
     }
 
     void SaveGameSettings()
@@ -1026,20 +1183,32 @@ partial class MainForm : Form
             var ini = new Ini(Builder.Ini(targetBox.Text));
             ini.Set("display", "fullscreen", fullscreen.Checked ? "1" : "0");
             ini.Set("display", "window_size", Value(windowSize));
+            if (Builder.HasRenderScale(targetBox.Text)) {
+                string output = Value(renderScale);
+                ini.Set("display", "output_res", output);
+                ini.Set("display", "svhost_test", "1"); // also bypasses the unrelated generic HeapDef growth at 1080p
+            }
             ini.Set("frame rate", "fps_limit", Value(fpsLimit));
             ini.Set("display", "vk_present", Value(present));
             ini.Set("display", "gpu_name", Value(gpu));
             ini.Set("display", "gpu_index", "");   // clears a stale manual TOTK_GPU_INDEX: both set at once can match no device
             string up = Value(upscaler);
-            ini.Set("display", "upscaler", up.StartsWith("dlss") ? "fsr" : up);   // (the present's scaler when DLSS is off)
+            ini.Set("display", "upscaler", up.StartsWith("dlss") || up == "fsr2" ? "fsr" : up);   // present scaler when temporal upscaling is off
             ini.Set("display", "operation_mode", Value(opMode));
-            ini.Set("display", "dlaa", Value(antiAliasing));
+            ini.Set("display", "dlaa", Value(antiAliasing) == "1" ? "1" : "0");
+            ini.Set("display", "fsr2", Value(antiAliasing) == "2" ? "1" : "0");
+            ini.Set("display", "fsr2_out", up == "fsr2" ? "window" : "game");
             ini.Set("display", "dlss_out", up == "dlss" ? "window" : up == "dlss4k" ? "3840x2160" : "game");
             ini.Set("display", "dlaa_preset", Value(dlssModel));
             ini.Set("display", "framegen", Value(frameGen));
             ini.Set("display", "sharpness", sharpness.Value.ToString());
             ini.Set("display", "perf_overlay", Value(overlay));
             ini.Set("display", "population", Value(population));
+            ini.Set("display", "people_shown", Value(peopleShown));
+            ini.Set("display", "people_detail", Value(peopleDetail));
+            ini.Set("display", "pokemon_detail", Value(pokemonDetail));
+            ini.Set("display", "ao", Value(ao));
+            ini.Set("display", "indirect_light", Value(indirectLight));
             ini.Set("display", "shadow_res", Value(shadowRes));
             ini.Set("display", "no_exclusives", noExclusives.Checked ? "1" : "0");
             ini.Set("display", "no_trade_evo", noTradeEvo.Checked ? "1" : "0");
@@ -1047,6 +1216,7 @@ partial class MainForm : Form
             ini.Set("performance", "acquire_ahead", level == "off" ? "0" : "1");
             ini.Set("performance", "core_lazy", level == "aggressive" ? "1" : "0");
             ini.Set("compatibility", "submit_defer", safeSubmit.Checked ? "0" : "1");
+            ini.Set("compatibility", "hot_cool", keepHotMemory.Checked ? "0" : "300");
             ini.Save();
             settingsNote.Text = "Saved. They apply the next time the game starts.";
         }

@@ -316,9 +316,13 @@ void mem_init(void) {
         .alias = {alias, ALIAS_SIZE},
         .kernel = {RT_KERNEL_BASE, RT_KERNEL_SIZE},
         .hostfn = {RT_HOSTFN_BASE, RT_HOSTFN_SIZE},
-        .pool = pool ? strtoull(pool, NULL, 0) : DEFAULT_POOL + res_heap_extra_bytes(),   // resolution.c
+        .pool = pool && *pool ? strtoull(pool, NULL, 0) : DEFAULT_POOL + res_heap_extra_bytes() +
+                res_shadow_budget_extra_bytes(),
     };
     if (!L.pool) rt_fatal("memory: TOTK_APP_POOL is 0");
+    if (res_shadow_budget_extra_bytes())
+        rt_log("shadow budget test: runtime application ceiling %.1f MiB (usual %.1f MiB)",
+               (double)L.pool / (1024.0 * 1024.0), (double)DEFAULT_POOL / (1024.0 * 1024.0));
 }
 
 const RtGuestLayout *mem_layout(void) { return &L; }
@@ -523,6 +527,7 @@ static uint32_t alias_map(int unmap, uint64_t a, uint64_t n) {
     uint64_t first = (a - L.alias.base) / PAGE, count = n / PAGE;
     plat_mutex_lock(&lock);
     uint32_t r = R_OK;
+    uint64_t fresh_bytes = 0, image_used = 0, headroom = 0;
     if (unmap) {
         for (unsigned i = 0; i < nstack_maps; i++)
             if (overlaps(a, n, stack_maps[i].src, stack_maps[i].size)) {
@@ -536,7 +541,11 @@ static uint32_t alias_map(int unmap, uint64_t a, uint64_t n) {
     } else {
         uint64_t fresh = 0;
         for (uint64_t i = 0; i < count; i++) fresh += !alias_pages[first + i];
-        if (fresh * PAGE + alias_bytes + heap_size + image_bytes() > L.pool) {
+        fresh_bytes = fresh * PAGE;
+        image_used = image_bytes();
+        uint64_t used = alias_bytes + heap_size + image_used;
+        headroom = used < L.pool ? L.pool - used : 0;
+        if (used > L.pool || fresh_bytes > headroom) {
             r = R_LIMIT_REACHED;   // the SDK maps LimitReached to its recoverable out-of-memory result
             goto out;
         }
@@ -545,9 +554,14 @@ static uint32_t alias_map(int unmap, uint64_t a, uint64_t n) {
     }
 out:
     plat_mutex_unlock(&lock);
-    if (r) rt_log("%sMapPhysicalMemory %#llx+%#llx failed %#x (alias %#llx used, heap %#llx)", unmap ? "Un" : "",
-                  (unsigned long long)a, (unsigned long long)n, r, (unsigned long long)alias_bytes,
-                  (unsigned long long)heap_size);
+    if (r == R_LIMIT_REACHED)
+        rt_log("MapPhysicalMemory %#llx+%#llx failed %#x (new %#llx, free %#llx, alias %#llx, heap %#llx, modules %#llx, pool %#llx)",
+               (unsigned long long)a, (unsigned long long)n, r, (unsigned long long)fresh_bytes,
+               (unsigned long long)headroom, (unsigned long long)alias_bytes, (unsigned long long)heap_size,
+               (unsigned long long)image_used, (unsigned long long)L.pool);
+    else if (r) rt_log("%sMapPhysicalMemory %#llx+%#llx failed %#x (alias %#llx used, heap %#llx)", unmap ? "Un" : "",
+                       (unsigned long long)a, (unsigned long long)n, r, (unsigned long long)alias_bytes,
+                       (unsigned long long)heap_size);
     return r;
 }
 

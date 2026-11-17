@@ -190,6 +190,7 @@ void ldr_load(const char *exefs_dir);                      // load, relocate (ov
 int ldr_count(void);
 const RtLoaded *ldr_module(int i);                         // order: main, subsdk0, sdk
 void lod_init(void);                                       // KarPur lod.c: from rt_patches_init
+void sv_detail_present(void);                              // Violet model detail thresholds, once per presented frame
 void data_patch_init(void);                                // KarPur data_patch.c: from romfs.c init
 void data_patch_read(uint64_t off, void *buf, uint64_t n);  // KarPur data_patch.c: after each RomFS image read
 void data_patch_decoded(const uint8_t *packed, uint64_t packed_n, uint8_t *out, uint64_t n);   // after an Oodle decode
@@ -281,6 +282,12 @@ void movie_tick(Cpu *c);                                   // at every present, 
                                                            // decoded movie frames over when due, signals their events
 // ---- game resolution (resolution.c): TOTK_OUTPUT_RES, TOTK_RENDER_SCALE
 uint64_t res_heap_extra_bytes(void);                       // added to the application pool (mem_init), 2 MiB steps
+uint32_t res_shadow_budget_extra_bytes(void);              // opt-in 4096 shadow budget experiment; 0 normally
+int res_shadow_budget_active(void);
+int res_sv_host_active(void);                               // Violet host-owned render-target experiment; no pool growth
+void res_sv_host_size(unsigned out[2]);                     // selected Violet output size, or zero when inactive
+int res_sv_ui_fit(void);                                     // non-16:9 Violet output needs a centred 16:9 UI
+void res_sv_wide_init(void);                                 // register camera aspect host calls before hostfn_seal
 uint32_t res_shadow_side(void);                             // the patched shadow map side; 0 = the game's own 1024
 int res_shadow_disabled(void);                              // TOTK_SHADOW_RES=off: skip every draw into the shadow map
 uint32_t res_shadow_map_side(void);                        // the shadow map's side in play, patched or the game's own

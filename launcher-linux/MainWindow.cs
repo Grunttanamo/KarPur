@@ -306,7 +306,7 @@ sealed class MainWindow : Window
                 Pick("base", "Base game (.xci or .nsp)", state.Base, false, v => state.Base = v, "xci", "nsp"),
                 Pick("update", "Update (.nsp)", state.Update, false, v => state.Update = v, "nsp"),
                 Pick("keys", "Your console's prod.keys", state.Keys, false, v => state.Keys = v, "keys"),
-                Pick("firmware", "Firmware folder (required for NSP base games)", state.Firmware, true, v => state.Firmware = v),
+                Pick("firmware", "Firmware folder (NSP or converted XCI)", state.Firmware, true, v => state.Firmware = v),
                 Pick("dlc", "DLC (.nsp, optional)", state.Dlc, false, v => state.Dlc = v, "nsp"))),
             Card(Stack(Text("Ready to build", 20),
                 Text("The AppImage includes the compiler, Python, and required development files. Select your own game files and allow at least 30 GB of free disk space. The first build can take a while.", 14, "#C1B7D1"))),
@@ -324,6 +324,9 @@ sealed class MainWindow : Window
         state.Dlc = inputs["dlc"].Text?.Trim() ?? "";
         if (!File.Exists(state.Base) || !File.Exists(state.Update) || !File.Exists(state.Keys))
             throw new IOException("Select existing files for the base game, update, and prod.keys.");
+        if (Path.GetExtension(state.Base).Equals(".nsp", StringComparison.OrdinalIgnoreCase) &&
+            !Directory.Exists(state.Firmware))
+            throw new IOException("An NSP base game needs your console's firmware folder for shared fonts. Choose it in Setup.");
         if (string.IsNullOrWhiteSpace(state.Target)) throw new IOException("Choose an installation folder.");
         state.Save();
         busy = true;
@@ -369,10 +372,29 @@ sealed class MainWindow : Window
         var ini = new Ini(Path.Combine(state.Target, "build", "game", "karpur.ini"));
         ComboBox Choice(string[] choices, string value) => new() { ItemsSource = choices, SelectedItem = choices.Contains(value) ? value : choices[0], HorizontalAlignment = HorizontalAlignment.Stretch };
         var fps = Choice(["30", "40", "45", "60", "90", "120", "144", "display"], ini.Get("fps_limit") ?? "60");
-        var size = Choice(["1280x720", "1280x800", "1600x900", "1920x1080", "1920x1200", "2560x1080", "2560x1440", "3840x2160"], ini.Get("window_size") ?? "1280x800");
+        var size = Choice(["800x450", "854x480", "960x720", "1080x1920", "1200x800", "1280x720", "1280x800",
+            "1440x1080", "1600x900", "1620x1080", "1920x1080", "1920x1200", "2560x1080", "2560x1440",
+            "3440x1440", "3840x2160", "5120x1440"], ini.Get("window_size") ?? "1280x800");
+        bool renderScaleAvailable = File.Exists(Path.Combine(state.Target, "build", "svhost_supported.txt")) &&
+            File.ReadAllText(Path.Combine(state.Target, "build", "svhost_supported.txt")).Trim() == "1";
+        var renderScale = Choice(["800x450", "854x480", "1280x720", "1920x1080", "2560x1440", "3840x2160",
+            "2560x1080", "3440x1440", "5120x1440", "1440x1080", "1620x1080", "1920x1200", "1080x1920"],
+            ini.Get("output_res") ?? "1920x1080");
+        renderScale.IsEnabled = renderScaleAvailable;
         var scale = Choice(["fsr", "bilinear"], ini.Get("upscaler") ?? "fsr");
         var shadow = Choice(["0", "2048", "3072", "4096", "off"], ini.Get("shadow_res") ?? "0");
+        var ao = Choice(["0", "1", "2", "3"], ini.Get("ao") ?? "0");
+        var indirectLight = Choice(["0", "1", "2", "3"], ini.Get("indirect_light") ?? "0");
         var population = Choice(["switch", "switch2", "enhanced", "extreme"], ini.Get("population") ?? "switch");
+        string Capped(string key, int maximum, string fallback) =>
+            int.TryParse(ini.Get(key), out int saved) && saved > maximum ? maximum.ToString() : ini.Get(key) ?? fallback;
+        var peopleShown = Choice(["12", "24", "36", "48"], Capped("people_shown", 48, "12"));
+        string[] peopleLevels = ["1", "2", "4", "6", "8", "10"];
+        string[] pokemonLevels = ["1", "2", "4", "6", "8"];
+        var peopleDetail = Choice(["Game (8 m)", "16 m", "32 m", "48 m", "64 m", "80 m"], "Game (8 m)");
+        var pokemonDetail = Choice(["Game (10 m)", "20 m", "40 m", "60 m", "80 m"], "Game (10 m)");
+        peopleDetail.SelectedIndex = Math.Max(0, Array.IndexOf(peopleLevels, Capped("people_detail", 10, "1")));
+        pokemonDetail.SelectedIndex = Math.Max(0, Array.IndexOf(pokemonLevels, Capped("pokemon_detail", 8, "1")));
         var stutter = Choice(["off", "standard", "aggressive"], ini.Get("core_lazy") == "1" ? "aggressive" : ini.Get("acquire_ahead") == "1" ? "standard" : "off");
         var present = Choice(["mailbox", "fifo", "immediate"], ini.Get("vk_present") ?? "mailbox");
         var overlay = Choice(["off", "fps", "full"], ini.Get("perf_overlay") ?? "off");
@@ -388,17 +410,41 @@ sealed class MainWindow : Window
         var sharpness = new Slider { Minimum = 0, Maximum = 100, Value = int.TryParse(ini.Get("sharpness"), out int value) ? Math.Clamp(value, 0, 100) : 80 };
         var handheld = new CheckBox { Content = "Handheld mode (720p, lower GPU load)", IsChecked = ini.Get("operation_mode") == "handheld" };
         var fullscreen = new CheckBox { Content = "Fullscreen", IsChecked = ini.Get("fullscreen") == "1" };
+        size.IsEnabled = fullscreen.IsChecked != true;
+        fullscreen.IsCheckedChanged += (_, _) => size.IsEnabled = fullscreen.IsChecked != true;
         var noExclusives = new CheckBox { Content = "All version-exclusive Pokémon", IsChecked = ini.Get("no_exclusives") == "1" };
         var noTradeEvo = new CheckBox { Content = "Trade evolutions without trading", IsChecked = ini.Get("no_trade_evo") == "1" };
         var safeSubmit = new CheckBox { Content = "Submit GPU work immediately (compatibility)", IsChecked = ini.Get("submit_defer") == "0" };
+        var keepHotMemory = new CheckBox { Content = "Keep hot memory active (compatibility)", IsChecked = ini.Get("hot_cool") == "0" };
+        var fsr2 = new CheckBox { Content = "AMD FSR 2 (temporal anti-aliasing)", IsChecked = ini.Get("fsr2") == "1" };
+        var fsr2Window = new CheckBox { Content = "FSR 2 output at window size (when larger than the scene)",
+            IsChecked = ini.Get("fsr2_out") == "window", IsEnabled = fsr2.IsChecked == true };
+        fsr2.IsCheckedChanged += (_, _) => fsr2Window.IsEnabled = fsr2.IsChecked == true;
         Page("Settings", "Display and performance", Card(Stack(
-            Text("FPS limit", 14), fps, Text("Window size", 14), size,
-            Text("Window size controls output. The game scene uses docked or handheld resolution.", 13, "#B9AECF"),
+            Text("FPS limit", 14), fps, Text("Window size (windowed mode)", 14), size,
+            Text("Fullscreen uses the monitor size; Render scale remains independent.", 13, "#B9AECF"),
+            Text("Render scale", 14), renderScale,
+            Text(renderScaleAvailable
+                ? "The game renders at this size and fits it to the window. Other aspect ratios are experimental."
+                : "Render scale needs a Violet 4.0.0 build with the resolution patch.", 13, "#B9AECF"),
+            Text("New game: use 1920 x 1080 through character creation, then change Render scale and restart. Other sizes can misplace the preview and ID photo.", 13, "#B9AECF"),
             Text("Frame sync", 14), present, Text("Graphics card (blank = automatic)", 14), gpu,
-            Text("Upscaling", 14), scale, Text("FSR sharpness", 14), sharpness, fullscreen, handheld,
+            Text("Upscaling", 14), scale, Text("FSR sharpness", 14), sharpness, fsr2, fsr2Window,
+            Text("FSR 2 may leave trails on moving objects. It does not change the game's GPU pool or shadows.", 13, "#B9AECF"),
+            fullscreen, handheld,
             Text("Performance overlay", 14), overlay, Text("Shadow quality (0 = original)", 14), shadow,
-            Text("Wild Pokémon", 14), population, Text("Stutter reduction", 14), stutter,
-            safeSubmit, noExclusives, noTradeEvo,
+            Text("Ambient occlusion (0 = off; 1-3 quality)", 14), ao,
+            Text("Indirect light (0 = off; 1-3 quality)", 14), indirectLight,
+            Text("Screen-space GPU effects; the game's memory pools stay unchanged.", 13, "#B9AECF"),
+            Text("Wild Pokémon", 14), population,
+            Text("Town people shown", 14), peopleShown,
+            Text("How many static town people can have models at once. Higher counts may need more memory.", 13, "#B9AECF"),
+            Text("People detail", 14), peopleDetail, Text("Pokémon detail", 14), pokemonDetail,
+            Text("Minimum full-detail distance; an LOD mod may already use more. Spawning is separate.", 13, "#B9AECF"),
+            Text("Stutter reduction", 14), stutter,
+            safeSubmit, keepHotMemory,
+            Text("Keep hot memory active sets hot_cool = 0; turning it off restores 300. It may reduce performance over longer play.", 13, "#B9AECF"),
+            noExclusives, noTradeEvo,
             Text("Launcher colour", 14), colour,
             Action("Save settings", () =>
             {
@@ -407,7 +453,11 @@ sealed class MainWindow : Window
                         (string)scale.SelectedItem!, (string)present.SelectedItem!, (string)overlay.SelectedItem!, fullscreen.IsChecked == true,
                         (string)shadow.SelectedItem!, (string)population.SelectedItem!, noExclusives.IsChecked == true,
                         noTradeEvo.IsChecked == true, (string)stutter.SelectedItem!, (int)sharpness.Value,
-                        (string)gpu.SelectedItem!, safeSubmit.IsChecked == true);
+                        (string)gpu.SelectedItem!, safeSubmit.IsChecked == true,
+                        fsr2.IsChecked == true, fsr2Window.IsChecked == true,
+                        peopleLevels[peopleDetail.SelectedIndex], pokemonLevels[pokemonDetail.SelectedIndex],
+                        (string)peopleShown.SelectedItem!, (string)ao.SelectedItem!, (string)indirectLight.SelectedItem!,
+                        keepHotMemory.IsChecked == true, (string)renderScale.SelectedItem!);
                 state.Colour = (string)colour.SelectedItem!;
                 state.Save();
                 ApplyEdition();

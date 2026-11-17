@@ -62,6 +62,7 @@
 //
 // The original values never leave the player's PC; the log names fields and offsets only.
 #include <stdint.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -71,8 +72,6 @@
 #include "platform/platform.h"
 
 double gfx_window_refresh_hz(void);   // ui/menu.h, which is for the menu's C++ side too
-
-#define MAX_FIELDS 16384   // a large mod (Pokemon Compass: 2032 files) raises one size field per file
 
 typedef struct {
     uint64_t at;   // byte offset in romfs.bin, or in the unpacked file (decoded)
@@ -85,10 +84,23 @@ typedef struct {
     char name[64];
 } Field;
 
-static Field fields[MAX_FIELDS];   // romfs fields, sorted by offset
-static int nfields;
-static Field decoded[MAX_FIELDS];  // fields of Oodle-packed files
-static int ndecoded;
+static Field *fields;   // host-only RomFS fields, sorted by offset after loading
+static int nfields, cfields;
+static Field *decoded;  // host-only fields of Oodle-packed files
+static int ndecoded, cdecoded;
+
+static int add_field(Field **items, int *count, int *capacity, Field value) {
+    if (*count == *capacity) {
+        if (*capacity > INT_MAX / 2) return 0;
+        int next = *capacity ? *capacity * 2 : 256;
+        if ((size_t)next > SIZE_MAX / sizeof value) return 0;
+        Field *grown = realloc(*items, (size_t)next * sizeof value);
+        if (!grown) return 0;
+        *items = grown, *capacity = next;
+    }
+    (*items)[(*count)++] = value;
+    return 1;
+}
 
 #define MAX_TEXTS 1024
 typedef struct {
@@ -573,8 +585,14 @@ static int load_list(const char *path, float view, float spawn, float count, int
                          : !strcmp(group, "count") ? count : 1.0f;
             }
             if (!f.type || (!f.absolute && f.factor == 1.0f)) (*skipped)++;
-            else if (romfs && nfields < MAX_FIELDS) fields[nfields++] = f, taken++;
-            else if (oodle && ndecoded < MAX_FIELDS) decoded[ndecoded++] = f, taken++;
+            else if (romfs ? add_field(&fields, &nfields, &cfields, f)
+                           : add_field(&decoded, &ndecoded, &cdecoded, f)) taken++;
+            else {
+                (*skipped)++;
+                if (romfs && !strncmp(f.name, "modsize:", 8)) mod_file_failed = 1;
+                static int warned;
+                if (!warned++) rt_log("data patch: host field allocation failed; remaining fields are left alone");
+            }
         }
         line = nl + 1;
     }
@@ -609,7 +627,10 @@ void data_patch_init(void) {
                        .type = population[i].type, .absolute = 1, .value = population[i].value};
             if (!f.value) f.value = wild;
             snprintf(f.name, sizeof f.name, "%s", population[i].name);
-            decoded[ndecoded++] = f;
+            if (!add_field(&decoded, &ndecoded, &cdecoded, f)) {
+                rt_log("data patch: host field allocation failed for population values");
+                break;
+            }
         }
         rt_log("data patch: population %s, up to %d wild Pokemon at once", level, wild);
     }
@@ -678,7 +699,7 @@ void data_patch_init(void) {
             rt_log("data patch: a mod file could not be read: no mod file is replaced");
         }
     }
-    qsort(fields, (size_t)nfields, sizeof fields[0], by_offset);
+    if (nfields > 1) qsort(fields, (size_t)nfields, sizeof fields[0], by_offset);
     if (nfields) lo = fields[0].at, hi = fields[nfields - 1].at + 4;
     rt_log("data patch: %d fields in stored files and %d in packed files (%d left alone); view distance x%g, "
            "spawn distance x%g, spawn count x%g", nfields, ndecoded, skipped, view, spawn, count);

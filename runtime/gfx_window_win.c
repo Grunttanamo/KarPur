@@ -318,10 +318,13 @@ static void window_main(void *arg) {
         if (!background) {
             FLASHWINFO fw = {.cbSize = sizeof fw, .hwnd = g_hwnd, .dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG};
             FlashWindowEx(&fw);
-            g_fs_pending = cfg_fullscreen();
-            // Fullscreen is what the player chose to see, so that window comes to the front at once instead of waiting
-            // behind the others for a click. Windows may refuse this (another program in front): the wait above stays.
-            if (g_fs_pending) SetForegroundWindow(g_hwnd);
+            if (cfg_fullscreen()) {
+                // Establish the monitor-sized client area before the first Vulkan surface query. Deferring this until
+                // activation let the first swapchain retain the old windowed extent on some drivers.
+                toggle_fullscreen(g_hwnd);
+                g_fs_pending = !is_fullscreen(g_hwnd);   // retry on activation only if the early transition failed
+                SetForegroundWindow(g_hwnd);
+            }
         }
         note_applied();
         refresh_rate_update(g_hwnd, 1);

@@ -10,7 +10,7 @@ Output for the launcher, one line each: "STEP <n> <total> <key>" when a step beg
 second run redoes what is missing or changed, which is the launcher's Repair and update), "LOG <text>" for everything the tools print (also in build/setup.log), "DONE <path of karpur.exe>" at the end, or
 "ERROR <step> <text>" and exit code 1. No key values are ever printed.
 
-  python tools/setup_build.py --base GAME.xci --update UPDATE.nsp [--dlc DLC.nsp] --keys prod.keys
+  python tools/setup_build.py --base GAME.xci|GAME.nsp --update UPDATE.nsp [--dlc DLC.nsp] --keys prod.keys
 """
 
 import argparse
@@ -193,7 +193,7 @@ STEP_INPUTS = {
     'romfs': ['tools/extract_romfs.py', 'tools/romfs_index.py'],
     'dlc': ['tools/extract_dlc.py'],
     'menu': ['tools/data/ui_patch_violet_4.0.0.txt'],
-    'fps': ['tools/fps_patches.py'],
+    'fps': ['tools/fps_patches.py', 'tools/sv_host_targets.py', 'tools/data/violet_host_targets_v400.txt'],
     'icon': ['tools/game_icon.py'],
     'lift': ['recomp/**/*.py', 'tools/lift.py'],
     'build': ['runtime/**/*', 'tools/build_game.py', 'tools/romfs_index.py'],
@@ -204,7 +204,7 @@ STEP_OUTPUTS = {
     'romfs': ['game/romfs/romfs.bin', 'game/romfs/index.json'],
     'dlc': ['game/dlc'],
     'menu': ['game/ui_patch.txt'],
-    'fps': ['build/fps_patches.txt'],
+    'fps': ['build/fps_patches.txt', 'build/sv_host_targets.txt', 'build/svhost_supported.txt'],
     'build': [EXE.relative_to(ROOT).as_posix()],
     'shaders': ['build/game/shader-prepared.bin'],
 }
@@ -309,7 +309,7 @@ def linux_toolchain():
 
 def build_native(py, env):
     command = [py, 'tools/build_game.py']
-    if ZIG.is_file():
+    if not WIN and ZIG.is_file():
         env['KARPUR_PORTABLE_ZIG'] = '1'
         env['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build' / 'zig-cache')
         command += ['--toolchain', PORTABLE, '--ninja', PORTABLE / 'bin' / 'ninja', '--deps', PORTABLE_DEPS]
@@ -321,7 +321,7 @@ def build_native(py, env):
 
 
 def lift_native(py, env):
-    command = [py, 'tools/lift.py']
+    command = [py, 'tools/lift.py', '--patches', 'build/sv_host_targets.txt']
     if ZIG.is_file() and not WIN:
         env['KARPUR_PORTABLE_ZIG'] = '1'
         env['ZIG_GLOBAL_CACHE_DIR'] = str(ROOT / 'build' / 'zig-cache')
@@ -331,7 +331,7 @@ def lift_native(py, env):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument('--base', type=Path, required=True, help='base game XCI')
+    ap.add_argument('--base', type=Path, required=True, help='base game XCI or NSP (NSP also needs --firmware)')
     ap.add_argument('--update', type=Path, required=True, help='update NSP')
     ap.add_argument('--dlc', type=Path, action='append', default=[], help='DLC NSP (repeatable, optional)')
     ap.add_argument('--keys', type=Path, required=True, help='prod.keys')
@@ -365,7 +365,8 @@ def main():
         'romfs': lambda: run('romfs', [py, 'tools/extract_romfs.py'], env),
         'dlc': lambda: run('dlc', [py, 'tools/extract_dlc.py'], env),
         'menu': menu,
-        'fps': lambda: run('fps', [py, 'tools/fps_patches.py'], env),
+        'fps': lambda: (run('fps', [py, 'tools/fps_patches.py'], env),
+                        run('fps', [py, 'tools/sv_host_targets.py'], env)),
         'icon': lambda: icon(py, env) if WIN else out('LOG Linux launcher uses the bundled edition artwork'),
         'lift': lambda: lift_native(py, env),
         'build': lambda: build_native(py, env),

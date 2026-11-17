@@ -1,0 +1,33 @@
+# Violet 4.0.0 host render targets: offsets and MIT patch instructions only.
+# Source: Tera-recomp ca4e2bd, recomp/patches-v400.txt (svres).
+# The original game instructions are read from the player's own update and
+# checked as a group by SHA-256; none are stored in this file.
+bc525c @page:x9 b9408129
+bc5264 @page:x9 b9408529
+bd7018 @page:x8 f9404508
+bd7024 @page:x8 f9404908
+dfabf8 @page:x10 bd40ad43 1e230821 1e210808
+dfac04 1e230800 1e200849
+d42930 @page:x8 b9409908
+d42940 @page:x8 b9409d08
+187be70 @page:x8 b9409908
+2635370 @page:x10 b940814a
+2635374 @page:x11 b940856b
+1664100 @page:x9 b9408129
+16640f8 @page:x10 b940854a
+14b0020 @page:x8 b9408108
+14b0024 @page:x10 b940854a
+1664240 @page:x8 b940a508
+1664248 @page:x9 b940a929
+2635c90 @page:x10 b940a54a
+2635c94 @page:x11 b940a96b
+2636298 @page:x10 b940a54a
+263629c @page:x11 b940a96b
+116f498 @page:x10 b940a54a
+116f49c @page:x11 b940a96b
+135d1e8 @page:x8 b940a508
+135d1f0 @page:x8 b940a908
+17d9e64 @page:x8 b940a508
+17d9e68 @page:x10 b940a94a
+e939c4 @page:x10 b940a54a
+e939c8 @page:x11 b940a96b

@@ -219,6 +219,9 @@ int vk_mem_hot_refresh_record(VkCommandBuffer cb);   // records those copies (ou
 // write into CPU-visible memory at record time (vk_mem_gpu_pending) and reports it at the fence with vk_gpu_written,
 // which copies the bytes back into guest memory before telling the texture cache (vk_guest_written).
 void vk_mem_shadow_sync(void);
+int vk_mem_shadow_end(VkCommandBuffer cb);
+int vk_mem_shadow_active(void);
+int vk_mem_span_shadowed(const VkMemSpan *sp);
 void vk_mem_gpu_pending(uint64_t addr, uint64_t size);
 void vk_gpu_written(uint64_t addr, uint64_t size);
 int vk_mem_mirror_probe(uint64_t addr);   // --probe-vkexec: the pool at addr gets its mirror as on a first buffer use;

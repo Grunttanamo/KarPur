@@ -6,9 +6,9 @@ namespace KarPurLinux;
 
 static class Program
 {
-    public const string Version = "0.3.8";
-    // The visible release version matches Windows. This later internal revision replaces older Deck test launchers.
-    public const string BuildRevision = "0.3.8.11";
+    public const string Version = "0.4.0";
+    // The internal revision also replaces earlier Deck test launchers when pinning the AppImage.
+    public const string BuildRevision = "0.4.0.1";
     [STAThread]
     public static int Main(string[] args)
     {

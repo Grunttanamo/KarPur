@@ -45,12 +45,14 @@ Sets (switched with their TOTK_ variable):
 
 Tried and dropped: the 30 fps frame time and vsync count in main+0x2b79f60 (no effect on the interval or the speed).
 
-tools/lift.py uses build/fps_patches.txt by itself when the file exists.
+For Violet 4.0.0, tools/sv_host_targets.py appends Render-scale and camera sites to this baseline table.
+Lift with build/sv_host_targets.txt to keep those settings available.
 Background: docs/progress.md 2026-11-02 (a third-party frame-rate mod for Violet, read for behaviour only, and
 tools/consts.py / calls.py --insn reports of 4.0.0).
 
   .venv\\Scripts\\python tools\\fps_patches.py
-  .venv\\Scripts\\python tools\\lift.py --patches build\\fps_patches.txt --gen-only
+  .venv\\Scripts\\python tools\\sv_host_targets.py
+  .venv\\Scripts\\python tools\\lift.py --patches build\\sv_host_targets.txt --gen-only
 """
 
 import argparse
@@ -92,6 +94,7 @@ def ldr_w(rt, rn, off):
 PAGE_FRAME_NS = 64   # patch page byte offset of the frame time in ns (runtime/frame_dt.c; recomp/patches.py layout)
 PAGE_LOD_BIAS = 72   # patch page byte offset of the LOD bias float (runtime/lod.c)
 PAGE_SHADOW_RES = 76   # patch page byte offset of the shadow map side in pixels (runtime/resolution.c)
+PAGE_SHADOW_BUDGET_POOL = 80  # opt-in 4096-shadow budget experiment (runtime/resolution.c)
 
 
 def movz_w(rd, imm16, shift):
@@ -155,11 +158,18 @@ SITES = [
     # object into x13, the side in pixels of the sun shadow map's render target (the game's own is 1024); the field
     # is recomputed from elsewhere every time, so changing it at runtime does not stick. Read the patch page instead.
     ('shadow', 'TOTK_SHADOW_RES', 0, 0x16dc200, 0xb983d66d, ['@page:x13', ldr_w(13, 13, PAGE_SHADOW_RES)]),
+    # Only for the reversible budget experiment. The normal shadow path leaves this game instruction untouched.
+    ('shadow_budget', 'TOTK_SHADOW_BUDGET_TEST', 0, 0x146e770, 0x52a21809,
+     ['@page:x9', ldr_w(9, 9, PAGE_SHADOW_BUDGET_POOL)]),
+    # Violet's GlobalHeap adds a fixed 2920 MiB to the SDK memory-info field.
+    # Increase that constant by the same 180 MiB only in the matched-budget test.
+    ('shadow_global', 'TOTK_SHADOW_BUDGET_TEST', 0, 0x2b7db00, movz_w(10, 0xb680, 16),
+     [movz_w(10, 0xc1c0, 16)]),
     # interval_one (test): main+0x2b7a874 `add w1, w20, #1` (w20 read from [x10, #0x20]) is the argument of a virtual
     # call in the frame-mode function main+0x2b79f60; the third-party 3.0.1 60 fps patch sets w1 = 1 at this offset
     ('interval_one', 'TOTK_INTERVAL_ONE', 0, 0x2b7a874, 0x11000000 | 1 << 10 | 20 << 5 | 1, [movz_w(1, 1, 0)]),
 ]
-OPTIONAL = {'lod_bias', 'data_watch', 'step_ten', 'indoor_fix', 'dynres_full', 'interval_one', 'lua_mod', 'shadow'}
+OPTIONAL = {'lod_bias', 'data_watch', 'step_ten', 'indoor_fix', 'dynres_full', 'interval_one', 'lua_mod', 'shadow', 'shadow_budget', 'shadow_global'}
 OODLE_DECOMPRESS = 0xcc8750   # main offset of OodleLZ_Decompress in 4.0.0 (calls.py --string oodle, 2026-11-02)
 PAGE_OODLE_HOST = 0xfd0       # patch page offset of the host wrapper (runtime/data_watch.c)
 # Lua (docs/progress.md 2026-11-03, calls.py --string / --refs on 4.0.0)

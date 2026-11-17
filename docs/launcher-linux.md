@@ -1,8 +1,8 @@
 # KarPur Launcher for Linux
 
-This separate Linux launcher uses Avalonia and is built as `KarPur-Launcher-Linux-x86_64.AppImage`. For Steam Deck, use `KarPur-Linux-Launcher-0.3.8.AppImage`. Only the AppImage needs to be transferred. A complete folder package is also available as `KarPur-Launcher-Linux-x86_64.tar.gz`.
+This separate Linux launcher uses Avalonia and is built as `KarPur-Launcher-Linux-x86_64.AppImage`. For the 0.4.0 candidate on Steam Deck, use `KarPur-Linux-Launcher-0.4.0.AppImage`. Only the AppImage needs to be transferred. A complete folder package is also available as `KarPur-Launcher-Linux-x86_64.tar.gz`.
 
-The launcher builds and repairs the native Linux game from your own dumps, starts an existing installation, manages graphics settings and saves, and shows the build log. Home uses the existing edition artwork and logos. Version 0.3.8 has an English interface and separate Controls and Update pages.
+The launcher builds and repairs the native Linux game from your own dumps, starts an existing installation, manages graphics settings and saves, and shows the build log. Home uses the existing edition artwork and logos. The 0.4.0 candidate has an English interface and separate Controls and Update pages.
 
 **Experimental:** Trees and other scenery can be missing on Steam Deck, and performance can vary. Home links to GitHub Issues and pull requests. Reports from people familiar with Linux and Vulkan are especially helpful when they include the device, graphics driver, and logs.
 
@@ -11,13 +11,13 @@ The launcher builds and repairs the native Linux game from your own dumps, start
 This release requires x86-64 Linux with glibc 2.38 or newer, such as Ubuntu 24.04 or newer. The minimum comes from the bundled SDL3 library. Make the AppImage executable:
 
 ```sh
-chmod +x KarPur-Linux-Launcher-0.3.8.AppImage
+chmod +x KarPur-Linux-Launcher-0.4.0.AppImage
 ```
 
 Then start it:
 
 ```sh
-./KarPur-Linux-Launcher-0.3.8.AppImage
+./KarPur-Linux-Launcher-0.4.0.AppImage
 ```
 
 If you use the folder package, extract the entire archive and start `linux-x64/KarPur-Launcher-Linux`. Keep `linux-x64/payload.zip` beside the executable. A launcher copied on its own from `bin/Release` cannot install the game.
@@ -25,7 +25,7 @@ If you use the folder package, extract the entire archive and start `linux-x64/K
 If your system cannot mount AppImages with FUSE, use the extraction fallback:
 
 ```sh
-./KarPur-Linux-Launcher-0.3.8.AppImage --appimage-extract-and-run
+./KarPur-Linux-Launcher-0.4.0.AppImage --appimage-extract-and-run
 ```
 
 ## Set up the game
@@ -48,17 +48,29 @@ The **Controls** page can disable the preset and change stick and camera options
 
 **Update** checks public GitHub releases for a Linux AppImage. When one is available, the launcher can download it, verify its SHA-256 file when provided, and install a runnable copy in the game folder. Restart the launcher afterwards. Until a Linux AppImage is published, the page says so.
 
-## Add Linux to the existing GitHub release
+## Add Linux to the 0.4.0 GitHub release
 
-Open the `v0.3.8` release and click the **Edit** pencil. Add `KarPur-Linux-Launcher-0.3.8.AppImage` and `KarPur-Linux-Launcher-0.3.8.AppImage.sha256` alongside the Windows asset, then click **Update release**. Keep the Windows file. Mark Linux support as experimental in the release notes and link to GitHub Issues and pull requests.
+After the final clean-install tests, create the `v0.4.0` release and add `KarPur-Linux-Launcher-0.4.0.AppImage` and its `.sha256` file alongside the Windows asset. Mark Linux support as experimental in the release notes and link to GitHub Issues and pull requests.
 
 On a Deck with an older test launcher, start the new AppImage directly once. When it opens an existing installation, it replaces the old desktop shortcut with this version.
 
-GitHub's automatic **Source code (zip/tar.gz)** archives remain tied to the original `v0.3.8` tag. A later tag, created after the Linux source commit, is needed for those archives to include Linux. Do not move the published tag.
+GitHub's automatic **Source code (zip/tar.gz)** archives reflect the commit tagged `v0.4.0`; the tag must be created only after the Linux and Windows source changes are committed.
 
 ## Settings and saves
 
-Settings are written to `build/game/karpur.ini` while preserving existing comments and other values. Docked/Handheld selects the game's internal resolution; Window size selects the output size. The former Steam Deck experiments for `MEMORY=import` and compute shader translation have been removed. Old values in `launcher.json` no longer affect game launches. Removing them does not require rebuilding the game.
+Settings are written to `build/game/karpur.ini` while preserving existing comments and other values. Window size selects the display size; Render scale selects the game's image size on a supported Violet 4.0.0 build. Choices include 800×450 through 3840×2160 and experimental wide, tall and portrait shapes. The former Steam Deck experiments for `MEMORY=import` and compute shader translation have been removed. Old values in `launcher.json` no longer affect game launches.
+
+For a **new game**, leave Render scale at **1920×1080 through character creation**. The character preview and ID photo can be misplaced or absent at other internal resolutions. After character creation, change Render scale and restart the game. The window may still be set to a different size during setup.
+
+Settings has a separate **Keep hot memory active** compatibility switch. On writes `hot_cool = 0`; off restores the runtime's `hot_cool = 300` default. It is independent of the existing immediate GPU submission option. Keeping hot chunks active may reduce performance over longer play; Steam Deck gameplay has not been checked with this option.
+
+The 0.4.0 candidate includes optional **AMD FSR 2** and a separate window-sized output switch. Its Vulkan implementation and shaders are in the source payload; no separate FSR download is needed. Steam Deck gameplay with FSR 2 still needs testing.
+
+Settings offers separate **Ambient occlusion** and **Indirect light** levels (0 off, 1–3 quality levels), both off by default. They add screen-space contact shadowing and a simple visible-colour bounce before the HUD, using host Vulkan images outside the game's unchanged pools. Linux gameplay and GPU performance remain untested.
+
+Settings also offers six **People detail** distances (the game's 8 m through 80 m) and five **Pokémon detail** distances (the game's 10 m through 80 m). They set a minimum full-detail model distance; an active LOD mod may already set a higher one. They do not change when an entity spawns or becomes visible. Both default to the loaded game's own distances. The Linux AppImage and gameplay have not yet been tested with these choices.
+
+**Town people shown** controls how many static people in a town can have models at once: 12 (the game's own value), 24, 36 or 48. The separate GlobalHeap correction only resets a wrapped-negative used counter; it does not enlarge any memory pool. Higher counts may run into real memory pressure, especially on Steam Deck. The Linux build and gameplay still need testing.
 
 Save export creates a ZIP with `main` at its top level. Import checks the archive before replacing anything and backs up the current save under `build/profile/save-backup`. Import and export are disabled while the game is running. Let the game finish any pending save before exporting.
 

@@ -32,9 +32,12 @@
 #include "taa_mv_spv.h"
 #include "vk.h"
 #include "vk_dlaa.h"
+#include "vk_fsr2.h"
 #include "vk_slfg.h"
+#include "platform/platform.h"
 
 static struct {
+    int mode;                           // 1 NVIDIA DLAA/DLSS, 2 AMD FSR 2
     int init, ok;                        // pipeline made (ok) or tried
     PFN_vkCmdPushDescriptorSetKHR push;
     VkDescriptorSetLayout dsl;
@@ -82,6 +85,7 @@ static struct {
     volatile int shown_kind;             // the last frame's: 0 no resolve, 1 DLAA, 2 DLSS to a larger picture (the overlay)
     volatile uint32_t shown_w, shown_h, shown_ow, shown_oh;
     uint64_t index, resolves;
+    uint64_t last_resolve_ns;
     float sign_x, sign_y, bias;
     int logged;
 } T;
@@ -90,7 +94,8 @@ int vk_taa_on(void) {
     static int checked, on;
     if (!checked) {
         checked = 1;
-        on = vk_dlaa_available();
+        T.mode = rt_knob("FSR2", "0") ? 2 : vk_dlaa_available() ? 1 : 0;
+        on = T.mode != 0;
         if (on) {
             const char *e = cfg_get("TOTK_DLAA_AT");
             T.at = e && *e ? (uint32_t)strtoul(e, NULL, 16) : 0x333e928au;
@@ -99,7 +104,7 @@ int vk_taa_on(void) {
             T.sign_y = y && *y ? (float)atof(y) : 1.0f;
             T.bias = b && *b ? (float)atof(b) : 0.0f;
             T.depth_inv = -1;
-            rt_log("dlaa: on; resolves after fragment shader %08x", T.at);
+            rt_log("%s: on; resolves after fragment shader %08x", T.mode == 2 ? "fsr2" : "dlaa", T.at);
         } else if (vk_dlaa_wanted()) rt_log("dlaa: TOTK_DLAA=1 but DLSS is not available (see the dlaa: lines above): off");
     }
     return on;
@@ -152,7 +157,8 @@ int vk_taa_frame(void) {
     T.jitter_on = T.resolved;
     T.index++;
     uint32_t i = (uint32_t)(T.index % (T.phases ? T.phases : 8)) + 1;
-    T.jx = halton(i, 2) - 0.5f + T.bias, T.jy = halton(i, 3) - 0.5f + T.bias;
+    if (T.mode == 2) vk_fsr2_jitter((uint32_t)T.index, T.sw ? T.sw : 1920, T.ow ? T.ow : 1920, &T.jx, &T.jy);
+    else T.jx = halton(i, 2) - 0.5f + T.bias, T.jy = halton(i, 3) - 0.5f + T.bias;
     T.have_cur = T.resolved = T.upscaled = 0;
     return up;
 }
@@ -161,10 +167,10 @@ int vk_taa_frame(void) {
 // picture, as the present fits it), or <w>x<h>; at most 3 times the scene per side. Read every frame (window resizes).
 static void out_size(uint32_t w, uint32_t h, uint32_t *ow, uint32_t *oh) {
     *ow = w, *oh = h;
-    const char *e = cfg_value("TOTK_DLSS_OUT");
+    const char *e = cfg_value(T.mode == 2 ? "TOTK_FSR2_OUT" : "TOTK_DLSS_OUT");
     unsigned x = 0, y = 0;
     // Frame generation needs the picture without the HUD at the size the present shows (vk_slfg.cpp): the window's
-    if (slfg_generating()) {
+    if (T.mode == 1 && slfg_generating()) {
         static int said;
         if (strcmp(e, "window") && !said++) rt_log("dlaa: frame generation on: DLSS's output follows the window (TOTK_DLSS_OUT=%s ignored)", e);
         e = "window";
@@ -373,12 +379,14 @@ void vk_taa_after_draw(VkExec *ex, uint32_t fs) {
     uint32_t w = ct->width, h = ct->height;
     if (!ct->image || !ct->img || ex->depth.image || w != T.dw || h != T.dh) {
         if (T.logged++ < 4)
-            rt_log("dlaa: the tone mapping draw does not match (target %ux%u, scene depth %ux%u): no resolve", w, h, T.dw, T.dh);
+            rt_log("%s: the tone mapping draw does not match (target %ux%u, scene depth %ux%u): no resolve",
+                   T.mode == 2 ? "fsr2" : "dlaa", w, h, T.dw, T.dh);
         return;
     }
     const VkImageUsageFlags xfer = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     if ((ct->img->usage & xfer) != xfer || !(T.depth->usage & VK_IMAGE_USAGE_SAMPLED_BIT)) {
-        if (T.logged++ < 4) rt_log("dlaa: the picture cannot be copied or the depth cannot be sampled: no resolve");
+        if (T.logged++ < 4) rt_log("%s: the picture cannot be copied or the depth cannot be sampled: no resolve",
+                                   T.mode == 2 ? "fsr2" : "dlaa");
         return;
     }
     VkCtx *c = vk_ctx();
@@ -419,7 +427,22 @@ void vk_taa_after_draw(VkExec *ex, uint32_t fs) {
                     .jx = (T.jitter_on ? T.jx : 0) * T.sign_x, .jy = (T.jitter_on ? T.jy : 0) * T.sign_y, .dt_ms = 16.7f,
                     .reset = reset, .depth_inv = T.depth_inv > 0};
     rec_drain();   // DLSS records into cb itself: the recorder has made every call queued before
-    int ok = vk_dlaa_record(c->device, cb, &f);
+    int ok;
+    if (T.mode == 2) {
+        uint64_t now = plat_now_ns();
+        float dt = T.last_resolve_ns ? (float)((now - T.last_resolve_ns) / 1e6) : 16.7f;
+        T.last_resolve_ns = now;
+        float near_z = fabsf(T.proj[14] / (fabsf(T.proj[11]) > 1e-5f ? T.proj[11] : 1.0f));
+        float scale_y = fabsf(T.proj[5]);
+        VkFsr2Frame fr = {.color = f.color, .depth = f.depth, .mv = f.mv, .out = f.out,
+                          .color_view = f.color_view, .depth_view = f.depth_view, .mv_view = f.mv_view, .out_view = f.out_view,
+                          .color_format = f.color_format, .depth_format = f.depth_format, .out_format = f.out_format,
+                          .w = w, .h = h, .ow = ow, .oh = oh, .jx = f.jx, .jy = f.jy,
+                          .dt_ms = fminf(fmaxf(dt, 1.0f), 100.0f), .near_z = near_z > 0.001f ? near_z : 0.1f,
+                          .fov_y = scale_y > 0.001f ? 2.0f * atanf(1.0f / scale_y) : 1.0f,
+                          .reset = reset, .depth_inv = f.depth_inv};
+        ok = vk_fsr2_record(c->phys, c->device, cb, &fr);
+    } else ok = vk_dlaa_record(c->device, cb, &f);
     full_barrier(cb);
     int up = ow != w || oh != h;
     if (ok && !up) copy_image(cb, T.img[2], ct->image, w, h);
@@ -438,15 +461,17 @@ void vk_taa_after_draw(VkExec *ex, uint32_t fs) {
     if (up) T.hud_view = vk_exec_target_view(ct->img, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_VIEW_TYPE_2D, VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1, 0);
     T.resolved = 1, T.upscaled = up && T.hud_view, T.sw = w, T.sh = h, T.resolves++;
     // DLSS Frame Generation's inputs of this frame (vk_slfg.cpp tags them at the present, in its command buffer)
-    memcpy(T.fg.cur, T.cur, 64), memcpy(T.fg.prev, reset ? T.cur : T.prev, 64), memcpy(T.fg.proj, T.proj, 64);
-    T.fg.jx = f.jx, T.fg.jy = f.jy, T.fg.reset = reset, T.fg.depth_inv = T.depth_inv > 0;
-    T.fg.depth = T.depth_image, T.fg.depth_view = dv, T.fg.depth_format = T.depth_format, T.fg.depth_usage = T.depth->usage;
-    T.fg.mv = T.img[1], T.fg.mv_view = T.view[1], T.fg.w = w, T.fg.h = h;
-    T.fg.hudless = T.img[5], T.fg.hudless_view = T.view[5], T.fg.ow = ow, T.fg.oh = oh;
+    if (T.mode == 1) {
+        memcpy(T.fg.cur, T.cur, 64), memcpy(T.fg.prev, reset ? T.cur : T.prev, 64), memcpy(T.fg.proj, T.proj, 64);
+        T.fg.jx = f.jx, T.fg.jy = f.jy, T.fg.reset = reset, T.fg.depth_inv = T.depth_inv > 0;
+        T.fg.depth = T.depth_image, T.fg.depth_view = dv, T.fg.depth_format = T.depth_format, T.fg.depth_usage = T.depth->usage;
+        T.fg.mv = T.img[1], T.fg.mv_view = T.view[1], T.fg.w = w, T.fg.h = h;
+        T.fg.hudless = T.img[5], T.fg.hudless_view = T.view[5], T.fg.ow = ow, T.fg.oh = oh;
+    }
     float ratio = (float)ow / (float)w;
     T.phases = (uint32_t)ceilf(8.0f * ratio * ratio);
     if (T.resolves == 1 || T.resolves % 3600 == 0)
-        rt_log("dlaa: %llu frames resolved (%ux%u -> %ux%u, jitter %s)", (unsigned long long)T.resolves, w, h, ow, oh,
+        rt_log("%s: %llu frames resolved (%ux%u -> %ux%u, jitter %s)", T.mode == 2 ? "fsr2" : "dlaa", (unsigned long long)T.resolves, w, h, ow, oh,
                T.jitter_on ? "on" : "not yet");
 }
 
@@ -457,8 +482,8 @@ void vk_taa_present_arm(int up) { T.present_up = up; }
 
 int vk_taa_describe(char *buf, size_t cap) {
     int k = T.shown_kind;
-    if (k == 2) snprintf(buf, cap, "NVIDIA DLSS %ux%u > %ux%u", T.shown_w, T.shown_h, T.shown_ow, T.shown_oh);
-    else if (k == 1) snprintf(buf, cap, "NVIDIA DLAA");
+    if (k == 2) snprintf(buf, cap, "%s %ux%u > %ux%u", T.mode == 2 ? "AMD FSR 2" : "NVIDIA DLSS", T.shown_w, T.shown_h, T.shown_ow, T.shown_oh);
+    else if (k == 1) snprintf(buf, cap, "%s", T.mode == 2 ? "AMD FSR 2" : "NVIDIA DLAA");
     return k;
 }
 
@@ -519,9 +544,10 @@ int vk_taa_compose(VkCommandBuffer cb, unsigned slot, VkImage shown, VkFormat fm
     vkCmdPushConstants(cb, T.clayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, pc);
     vkCmdDispatch(cb, (T.ow + 7) / 8, (T.oh + 7) / 8, 1);
     full_barrier(cb);
-    slfg_frame(cb, &T.fg);   // KarPur TOTK_FRAMEGEN: this frame's inputs and camera for DLSS Frame Generation
+    if (T.mode == 1) slfg_frame(cb, &T.fg);   // DLSS Frame Generation only consumes NVIDIA's resolve
     *out = T.img[4], *ow = (int)T.ow, *oh = (int)T.oh;
     static int logged;
-    if (!logged++) rt_log("dlaa: the present shows DLSS's %ux%u picture with the game's HUD over it", T.ow, T.oh);
+    if (!logged++) rt_log("%s: the present shows the %ux%u resolved scene with the game's HUD over it",
+                          T.mode == 2 ? "fsr2" : "dlaa", T.ow, T.oh);
     return 1;
 }

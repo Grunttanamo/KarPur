@@ -62,6 +62,7 @@ typedef struct VkExec {
     int has_vp;                          // a viewport was set; else the render area
     p_scissor scissor;                   // OP_SCISSOR (scissor 0)
     int has_scissor;                     // a scissor was set; else unbounded
+    int ui_fit;                          // Violet ultrawide: fit this draw into the centred 16:9 rectangle
     float depth_range[2];                // OP_DEPTH_RANGE: overrides the viewports' near and far
     uint32_t st_vmask[2], st_wmask[2], st_ref[2];   // OP_STENCIL per face (0 front, 1 back): compare mask, write mask, ref
     float point_size;                    // OP_BIND_STATE kind 6: NVN point size for the support buffer; 0 = never set = 1
@@ -179,6 +180,7 @@ extern VkExecFrame vk_exec_frame;
 int vk_exec_track_on(void);                                     // TOTK_BARRIER_TRACK (default 1)
 void vk_exec_hazard_draw(VkExec *ex, const GfxShader *vs, const GfxShader *fs);   // vk_exec_draw.c: before each draw
 void vk_exec_frame_written(const tex_t *t);                    // vk_texture_gpu_written: t rendered or copied into
+void vk_exec_note_written(VkExec *ex, uint64_t addr, uint64_t size);
 uint64_t vk_exec_recording_fence(void);                        // fence of the submission this thread records, else 0
 void vk_exec_frame_log(const tex_t *presented, uint64_t frame);
 void vk_cam_probe_frame(const tex_t *shown, uint64_t frame);   // vk_exec_draw.c, KarPur TOTK_CAM_PROBE=1: camera matrix candidates

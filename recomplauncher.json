@@ -1,0 +1,36 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "KarPur",
+  "repo": "Grunttanamo/KarPur",
+  "game": {
+    "kind": "iso",
+    "label": "Your own Pokemon Scarlet or Violet base game as an XCI cartridge dump. An NSP base game also works in the KarPur Launcher Setup tab when you provide your console firmware folder."
+  },
+  "inputs": [
+    {
+      "id": "update",
+      "label": "Update 4.0.0 (.nsp)",
+      "role": "update",
+      "formats": [{ "type": "file", "extensions": ["nsp"] }]
+    },
+    {
+      "id": "keys",
+      "label": "prod.keys from your own console",
+      "role": "key",
+      "shared": "switch.prod-keys"
+    }
+  ],
+  "start": {
+    "program": ["KarPur/build/game/karpur.exe"]
+  },
+  "prepare": {
+    "program": ["KarPur-Launcher.exe"],
+    "args": [
+      "--prepare", "--game", "{game}", "--update", "{input:update}",
+      "--keys", "{input:keys}", "--target", "{install}"
+    ],
+    "label": "Building KarPur from your game files (30-60 minutes)",
+    "timeout": 10800
+  }
+}

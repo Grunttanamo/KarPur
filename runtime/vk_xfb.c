@@ -255,8 +255,11 @@ void vk_xfb_draw_end(VkExec *ex, int prim, uint32_t n, uint32_t inst) {
     for (int b = 0; b < nbound; b++) {
         uint64_t bytes = verts * lay.stride[b], left = ex->xfb_buf[b].size - written[b];
         if (bytes > left) bytes = left;
-        vk_mem_gpu_wrote(&span[b], bytes);
-        vk_usnap_drop(span_addr[b], bytes);
+        int shadowed = vk_mem_span_shadowed(&span[b]);
+        uint64_t stored = shadowed && bytes > span[b].avail ? span[b].avail : bytes;
+        vk_mem_gpu_wrote(&span[b], stored);
+        vk_usnap_drop(span_addr[b], stored);
+        if (stored && shadowed) vk_exec_note_written(ex, span_addr[b], stored);
         written[b] += bytes;
     }
     captured_any = 1;

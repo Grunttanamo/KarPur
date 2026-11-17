@@ -26,6 +26,12 @@ class ModEntry
     public bool Analysed { get; set; }
 }
 
+class ModFilterSettings
+{
+    public int MaxSizeMiB { get; set; }
+    public bool BntxOnly { get; set; }
+}
+
 // An on/off switch in the launcher's colours.
 class Toggle : Control
 {
@@ -85,8 +91,11 @@ partial class MainForm
     readonly Label modNote = Theme.Label("", 9.5f, muted: true), modEmpty = Theme.Label("No mods yet. Add a mod folder or a .zip from NexusMods or another site.", 10f, muted: true);
     readonly Button addModFolder = Theme.Button("Add mod folder…", true, Theme.GlyphFolder), addModZip = Theme.Button("Add .zip…", glyph: Theme.GlyphImport),
                     openMods = Theme.Button("Open mods folder", glyph: Theme.GlyphFolder);
+    readonly ComboBox modMaxSize = Combo();
+    readonly CheckBox modBntxOnly = new ChoiceBox { AutoSize = true, ForeColor = Theme.Text, BackColor = Theme.Card,
+                                                    Text = "Only .bntx texture replacements" };
     List<ModEntry> mods = new();
-    bool modsBusy;
+    bool modsBusy, loadingModFilters;
 
     Control ModsPage()
     {
@@ -105,11 +114,31 @@ partial class MainForm
         modNote.Padding = new Padding(0, 10, 0, 0);
         modNote.MaximumSize = new Size(720, 0);
         modEmpty.Margin = new Padding(4, 8, 0, 0);
+        Fill(modMaxSize, new (string Value, string Name)[] {
+            ("0", "No size limit"), ("1", "1 MiB"), ("2", "2 MiB"), ("4", "4 MiB"),
+            ("8", "8 MiB"), ("16", "16 MiB"), ("32", "32 MiB"), ("64", "64 MiB") });
+        Select(modMaxSize, "0", "0");
+        modMaxSize.Width = 220;
+        var filters = Grid(2);
+        SettingRow(filters, "Maximum file size", modMaxSize);
+        SettingRow(filters, "File types", modBntxOnly);
+        var filterNote = Theme.Label("Optional for large texture packs: the reporter of #74 tested 16 MiB together with " +
+            "BNTX-only. Excluded files stay in their original mod folders. This does not change the game's memory limits.",
+            9.5f, muted: true);
+        filterNote.MaximumSize = new Size(720, 0);
+        filterNote.Dock = DockStyle.Top;
+        var filterTitle = Theme.Label("Large-pack filters", 11f, style: FontStyle.Bold);
+        filterTitle.Dock = DockStyle.Top;
+        filterTitle.Padding = new Padding(0, 0, 0, 8);
         page.Controls.Add(modList);
+        page.Controls.Add(Spacer(14));
+        page.Controls.Add(CardOf(filterTitle, filters, filterNote));
         page.Controls.Add(Spacer(14));
         page.Controls.Add(CardOf(how, actions, modNote));
         page.Controls.Add(Header("Mods (experimental)", "Your own mods for the game, each switched on or off. Changes apply at the next start of the game."));
         actions.BackColor = Theme.Card;
+        modMaxSize.SelectedIndexChanged += async (_, _) => { if (!loadingModFilters && SaveModFilters()) await ApplyMods(); };
+        modBntxOnly.CheckedChanged += async (_, _) => { if (!loadingModFilters && SaveModFilters()) await ApplyMods(); };
 
         addModFolder.Click += async (_, _) =>
         {
@@ -142,12 +171,78 @@ partial class MainForm
     }
 
     string ModsFile => Path.Combine(Builder.Root(targetBox.Text), "mods.json");
+    string ModFiltersFile => Path.Combine(Builder.Root(targetBox.Text), "build", "mod_filters.json");
+
+    // A copied installation can retain mod_files=1 and an old mod_files.txt even
+    // when its Mods page is empty. The registered switches are the source of truth.
+    void DisableOrphanedModList()
+    {
+        var ini = new Ini(Builder.Ini(targetBox.Text));
+        if (ini.Get("mod_files") != "1") return;
+        List<ModEntry> registered;
+        try { registered = JsonSerializer.Deserialize<List<ModEntry>>(File.ReadAllText(ModsFile)) ?? new(); }
+        catch { registered = new(); }
+        if (registered.Any(m => m.Enabled && Directory.Exists(m.Path))) return;
+        ini.Set("mods", "mod_files", "0");
+        ini.Save();
+    }
 
     void LoadMods()
     {
+        LoadModFilters();
         try { mods = JsonSerializer.Deserialize<List<ModEntry>>(File.ReadAllText(ModsFile)) ?? new(); }
         catch { mods = new(); }
+        FollowIni();
         RenderMods();
+    }
+
+    // karpur.ini is the game's actual switch. It can change outside this page,
+    // so reconcile the displayed list whenever the Mods page is opened.
+    void FollowIni()
+    {
+        if (targetBox.Text == "") return;
+        string? state = new Ini(Builder.Ini(targetBox.Text)).Get("mod_files");
+        if (state == "0" && mods.Any(m => m.Enabled))
+        {
+            foreach (var mod in mods) mod.Enabled = false;
+            SaveMods();
+            ModMessage("karpur.ini starts the game without mods. All mods are shown off; switch one on to use it again.");
+        }
+        else if (state != null && state != "0" && mods.Count > 0 && !mods.Any(m => m.Enabled))
+            ModMessage("karpur.ini enables mod files, but none is selected here. Select the mods you want to use.");
+    }
+
+    void LoadModFilters()
+    {
+        loadingModFilters = true;
+        try
+        {
+            ModFilterSettings? saved = null;
+            if (targetBox.Text != "" && File.Exists(Builder.Exe(targetBox.Text)))
+                try { saved = JsonSerializer.Deserialize<ModFilterSettings>(File.ReadAllText(ModFiltersFile)); }
+                catch (IOException) { }
+                catch (JsonException) { }
+            Select(modMaxSize, saved?.MaxSizeMiB.ToString(), "0");
+            modBntxOnly.Checked = saved?.BntxOnly == true;
+        }
+        finally { loadingModFilters = false; }
+    }
+
+    bool SaveModFilters()
+    {
+        if (targetBox.Text == "" || !File.Exists(Builder.Exe(targetBox.Text))) return false;
+        var saved = new ModFilterSettings {
+            MaxSizeMiB = int.TryParse(Value(modMaxSize), out int size) ? size : 0,
+            BntxOnly = modBntxOnly.Checked };
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ModFiltersFile)!);
+            string temp = ModFiltersFile + ".tmp";
+            File.WriteAllText(temp, JsonSerializer.Serialize(saved, new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temp, ModFiltersFile, true);
+            return true;
+        }
+        catch (IOException e) { ModMessage("Could not save the mod filters: " + e.Message, true); return false; }
     }
 
     void SaveMods()
@@ -185,6 +280,7 @@ partial class MainForm
         modList.Controls.Clear();
         bool built = targetBox.Text != "" && File.Exists(Builder.Exe(targetBox.Text));
         foreach (var b in new[] { addModFolder, addModZip, openMods }) b.Enabled = built && !modsBusy;
+        modMaxSize.Enabled = modBntxOnly.Enabled = built && !modsBusy;
         if (!built) ModMessage("Build the game first: mods belong to its folder.");
         if (mods.Count == 0) modList.Controls.Add(modEmpty);
         foreach (var m in mods.ToList())
@@ -264,8 +360,9 @@ partial class MainForm
             {
                 ModMessage($"Checking {ModInfo(m.Path).Name} against your game …");
                 var r = await RunModFiles(python, root, new[] { m.Path }, Path.Combine(root, "build", "mod_check.txt"));
-                if (r != null && r.Count == 1) (m.Replaces, m.Adds, m.Unpacked, m.Code, m.Analysed) = (r[0].Replaces, r[0].Adds, r[0].Unpacked, r[0].Code, true);
-                if (r != null && r.Count == 1 && r[0].Replaces == 0)
+                if (r != null && r.Mods.Count == 1) (m.Replaces, m.Adds, m.Unpacked, m.Code, m.Analysed) =
+                    (r.Mods[0].Replaces, r.Mods[0].Adds, r.Mods[0].Unpacked, r.Mods[0].Code, true);
+                if (r != null && r.Mods.Count == 1 && r.Mods[0].Replaces == 0)
                     ModMessage($"{ModInfo(m.Path).Name}: none of its files is a file of your game (another game or version?).", true);
             }
             var on = mods.Where(m => m.Enabled && Directory.Exists(m.Path)).Select(m => m.Path).ToArray();
@@ -279,10 +376,13 @@ partial class MainForm
             else
             {
                 ModMessage("Preparing the mods for the game …");
-                var r = await RunModFiles(python, root, on, Path.Combine(root, "game", "mod_files.txt"));
+                int maxSize = int.TryParse(Value(modMaxSize), out int selectedMax) ? selectedMax : 0;
+                var r = await RunModFiles(python, root, on, Path.Combine(root, "game", "mod_files.txt"),
+                                          maxSize, modBntxOnly.Checked);
                 ini.Set("mods", "mod_files", r != null ? "1" : "0");
                 ini.Save();
-                ModMessage(r != null ? $"{on.Length} mod{(on.Length == 1 ? "" : "s")} on: used at the next start of the game."
+                ModMessage(r != null ? $"{r.Listed:N0} replacement files selected from {on.Length} mod{(on.Length == 1 ? "" : "s")}; " +
+                    $"{r.SizeSkipped:N0} over the size limit, {r.TypeSkipped:N0} non-BNTX excluded. Used at the next start."
                                      : "Could not prepare the mods (see launcher.log); the game uses its own files.", r == null);
             }
             SaveMods();
@@ -296,8 +396,10 @@ partial class MainForm
     }
 
     record ModResult(int Replaces, int Adds, int Unpacked, bool Code);
+    record ModRunResult(List<ModResult> Mods, int Listed, int SizeSkipped, int TypeSkipped);
 
-    static async Task<List<ModResult>?> RunModFiles(string python, string root, string[] dirs, string outFile)
+    static async Task<ModRunResult?> RunModFiles(string python, string root, string[] dirs, string outFile,
+                                                 int maxSizeMiB = 0, bool bntxOnly = false)
     {
         var psi = new ProcessStartInfo(python) { WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
                                                  RedirectStandardOutput = true, RedirectStandardError = true };
@@ -305,6 +407,9 @@ partial class MainForm
         foreach (var d in dirs) psi.ArgumentList.Add(d);
         psi.ArgumentList.Add("--out");
         psi.ArgumentList.Add(outFile);
+        psi.ArgumentList.Add("--quiet-files");
+        if (maxSizeMiB > 0) { psi.ArgumentList.Add("--max-size-mib"); psi.ArgumentList.Add(maxSizeMiB.ToString()); }
+        if (bntxOnly) psi.ArgumentList.Add("--bntx-only");
         using var p = Process.Start(psi);
         if (p == null) return null;
         var outTask = p.StandardOutput.ReadToEndAsync();
@@ -313,9 +418,18 @@ partial class MainForm
         string text = await outTask, err = await errTask;
         try { File.AppendAllText(Path.Combine(root, "launcher.log"), $"=== mods {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n{text}{err}\n"); } catch { }
         var line = text.Split('\n').LastOrDefault(l => l.StartsWith("SUMMARY "));
-        if (p.ExitCode != 0 || line == null) return null;
-        using var doc = JsonDocument.Parse(line[8..]);
-        return doc.RootElement.EnumerateArray().Select(e => new ModResult(e.GetProperty("replaces").GetInt32(), e.GetProperty("adds").GetInt32(),
-                                                                           e.GetProperty("unpacked").GetInt32(), e.GetProperty("code").GetBoolean())).ToList();
+        var filter = text.Split('\n').LastOrDefault(l => l.StartsWith("FILTER "));
+        if (p.ExitCode != 0 || line == null || filter == null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(line[8..]);
+            using var counts = JsonDocument.Parse(filter[7..]);
+            var mods = doc.RootElement.EnumerateArray().Select(e => new ModResult(e.GetProperty("replaces").GetInt32(),
+                e.GetProperty("adds").GetInt32(), e.GetProperty("unpacked").GetInt32(), e.GetProperty("code").GetBoolean())).ToList();
+            var totals = counts.RootElement;
+            return new ModRunResult(mods, totals.GetProperty("listed").GetInt32(),
+                totals.GetProperty("size_skipped").GetInt32(), totals.GetProperty("type_skipped").GetInt32());
+        }
+        catch (JsonException) { return null; }
     }
 }

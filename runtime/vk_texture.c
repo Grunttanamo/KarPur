@@ -400,7 +400,8 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
     VkImage img = VK_NULL_HANDLE;
     // An enlarged shadow map owns its memory: the game reserved a 1024 map's bytes for it in the pool and gave the
     // rest to other textures, so aliasing the pool here would write over them (nvn_tex_shadow_grown, issue #61).
-    if (nvn_gpu_only(k->addr) && !nvn_tex_shadow_grown(d)) {   // storage in a pool: alias the pool memory (section 3.2)
+    if (nvn_gpu_only(k->addr) && !nvn_tex_shadow_grown(d) && !nvn_tex_sv_host_grown(d)) {
+        // A grown host-owned target must not alias the old-sized game slot.
         if (vkCreateImage(c->device, &ci, NULL, &img) == VK_SUCCESS && !bind_pool_memory(c, e, img, L.size)) {
             vkDestroyImage(c->device, img, NULL);
             img = VK_NULL_HANDLE;
@@ -428,6 +429,12 @@ static Tex *create_tex(const tex_t *t, const TexKey *k, int defer_init) {
         rt_log("shadow size texture %ux%u, %u layer(s), fmt %#x: %llu KiB in %s; the game was told %llu KiB", w, h,
                layers, d->format, (unsigned long long)(L.size >> 10),
                e->alloc ? "our own memory" : "the game's pool", (unsigned long long)(told.size >> 10));
+    }
+    if (nvn_tex_sv_host_grown(d)) {
+        static unsigned reported;
+        if (__atomic_fetch_add(&reported, 1u, __ATOMIC_RELAXED) < 20)
+            rt_log("resolution host test: %ux%u format %#x host image in %s; game storage remains old-sized",
+                   w, h, d->format, e->alloc ? "separate VRAM" : "the game's pool");
     }
     VkTexImage *p = &e->pub;
     p->image = img;

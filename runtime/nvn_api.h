@@ -42,6 +42,17 @@ static inline int nvn_tex_shadow_grown(const nvn_texdesc *d) {
     uint32_t side = res_shadow_side();
     return side > 1024 && d->width == side && d->height == side;
 }
+// The Violet test changes image dimensions without giving the game more GPU
+// storage. These render targets own host images and reserve their old-sized
+// slots in the unchanged game pool, just as enlarged shadows do.
+static inline int nvn_tex_sv_host_grown(const nvn_texdesc *d) {
+    unsigned out[2];
+    res_sv_host_size(out);
+    return (out[0] > 1920 || out[1] > 1080) && d->target == NVN_TEXTURE_TARGET_2D && d->samples <= 1 &&
+           (d->flags & NVN_TEXTURE_FLAGS_COMPRESSIBLE) &&
+           ((d->width == out[0] && d->height == out[1]) ||
+            (d->width == out[0] / 2 && d->height == out[1] / 2));
+}
 // A CPU-invisible physical or virtual pool lives in the GPU window: mem is its GPU address (never mapped on the host),
 // game_mem the game's storage (never touched), span the reserved window bytes, host NULL. Every other pool: mem is the
 // game's storage, the GPU address equals the guest address.

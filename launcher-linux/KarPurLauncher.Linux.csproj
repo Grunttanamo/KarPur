@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>KarPur-Launcher-Linux</AssemblyName>
     <RootNamespace>KarPurLinux</RootNamespace>
-    <Version>0.3.8</Version>
+    <Version>0.4.0</Version>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>false</PublishSingleFile>
     <InvariantGlobalization>false</InvariantGlobalization>

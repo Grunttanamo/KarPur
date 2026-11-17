@@ -31,6 +31,7 @@
 #include "tex.h"
 #include "vk.h"
 #include "vk_exec.h"
+#include "vk_lighting.h"
 #include "vk_taa.h"
 #include "platform/platform.h"
 
@@ -254,7 +255,7 @@ static uint8_t *scratch(VkExec *ex, uint64_t size, VkBuffer *buf, VkDeviceSize *
     return p;
 }
 
-static void note_written(VkExec *ex, uint64_t addr, uint64_t size) {
+void vk_exec_note_written(VkExec *ex, uint64_t addr, uint64_t size) {
     CbRes *r = cb_res(ex);
     for (int i = 0; i < r->nwritten; i++)
         if (r->written[i].addr == addr && r->written[i].size == size) return;
@@ -1264,6 +1265,10 @@ static int fs_desc;         // TOTK_SKIP_FS (declared above bind_range): the dra
 #define CV_RING (8ull << 20)
 #define CV_MAX_BLOCK (1ull << 20)
 #define CV_BLOCKS 32
+typedef struct {
+    VkDescriptorBufferInfo *info;
+    int move, written;
+} CvBinding;
 static VkBuffer cv_ring;
 static VmaAllocation cv_alloc;
 static uint64_t cv_used;
@@ -1288,23 +1293,24 @@ static int cv_on(void) {
     return on;
 }
 
-// A dispatch's block in imported memory: its bytes go to the ring and *bi binds them there.
-static void cv_shadow(VkExec *ex, VkDescriptorBufferInfo *bi, const VkMemSpan *sp, uint64_t align, int written) {
+// Keep the existing direct-import path for Windows and for explicit non-shadow Linux configurations.
+// The batch below only addresses aliases of the Linux shadow-backed host buffer.
+static void cv_shadow_direct(VkExec *ex, VkDescriptorBufferInfo *bi, const VkMemSpan *sp, uint64_t align, int written) {
     if (!sp->pool || bi->buffer != sp->buffer || bi->range > CV_MAX_BLOCK || cv_n == CV_BLOCKS) return;
     for (int i = 0; i < cv_n; i++) {
         if (cv_b[i].src != bi->buffer) continue;
-        if (cv_b[i].src_off == bi->offset && cv_b[i].range == bi->range) {   // the same block bound twice: one copy
+        if (cv_b[i].src_off == bi->offset && cv_b[i].range == bi->range) {
             cv_b[i].written |= written;
             bi->buffer = cv_ring, bi->offset = cv_b[i].off;
             return;
         }
         if (bi->offset < cv_b[i].src_off + cv_b[i].range && cv_b[i].src_off < bi->offset + bi->range) {
-            cv_overlaps++;   // partly the same bytes: stays in guest memory
+            cv_overlaps++;
             return;
         }
     }
     uint64_t off = (cv_used + align - 1) & ~(align - 1);
-    if (off + bi->range > CV_RING) off = 0;   // the commands run in order behind barriers: older contents are done with
+    if (off + bi->range > CV_RING) off = 0;
     cv_used = off + bi->range;
     VkBufferCopy cp = {bi->offset, off, bi->range};
     vkCmdCopyBuffer(ex->cb, bi->buffer, cv_ring, 1, &cp);
@@ -1315,6 +1321,59 @@ static void cv_shadow(VkExec *ex, VkDescriptorBufferInfo *bi, const VkMemSpan *s
     cv_copied = 1;
     cv_total++;
     bi->buffer = cv_ring, bi->offset = off;
+}
+
+// The source ranges and ring space have already been checked for the whole dispatch.
+static void cv_shadow(VkExec *ex, VkDescriptorBufferInfo *bi, uint64_t align, int written) {
+    for (int i = 0; i < cv_n; i++) {
+        if (cv_b[i].src != bi->buffer) continue;
+        if (cv_b[i].src_off == bi->offset && cv_b[i].range == bi->range) {   // the same block bound twice: one copy
+            cv_b[i].written |= written;
+            bi->buffer = cv_ring, bi->offset = cv_b[i].off;
+            return;
+        }
+    }
+    uint64_t off = (cv_used + align - 1) & ~(align - 1);
+    cv_used = off + bi->range;
+    VkBufferCopy cp = {bi->offset, off, bi->range};
+    vkCmdCopyBuffer(ex->cb, bi->buffer, cv_ring, 1, &cp);
+    ex->recorded++;
+    cv_b[cv_n].src = bi->buffer, cv_b[cv_n].src_off = bi->offset, cv_b[cv_n].off = off;
+    cv_b[cv_n].range = bi->range, cv_b[cv_n].written = written;
+    cv_n++;
+    cv_copied = 1;
+    cv_total++;
+    bi->buffer = cv_ring, bi->offset = off;
+}
+
+// Leave overlapping bindings in their original buffer so the dispatch sees the same bytes through each binding.
+// Check even bindings that cannot move, including uniforms. Exact aliases can share one ring range.
+static void cv_prepare(VkExec *ex, const CvBinding *bindings, int count) {
+    uint64_t align = LIM.sbo_align < 4 ? 4 : LIM.sbo_align;
+    uint64_t bytes = 0;
+    uint32_t movable = 0;
+    for (int i = 0; i < count; i++) {
+        if (!bindings[i].move) continue;
+        const VkDescriptorBufferInfo *a = bindings[i].info;
+        int alias = 0;
+        for (int j = 0; j < count; j++) {
+            if (j == i) continue;
+            const VkDescriptorBufferInfo *b = bindings[j].info;
+            if (a->buffer != b->buffer || a->offset >= b->offset + b->range || b->offset >= a->offset + a->range)
+                continue;
+            if (bindings[j].move && a->offset == b->offset && a->range == b->range) continue;
+            alias = 1;
+            break;
+        }
+        if (alias) { cv_overlaps++; continue; }
+        movable |= UINT32_C(1) << i;
+        bytes = ((bytes + align - 1) & ~(align - 1)) + a->range;
+    }
+    if (!movable || bytes > CV_RING) return;
+    // Wrap only between dispatches. Earlier dispatches finish with the ring before this one starts.
+    if (((cv_used + align - 1) & ~(align - 1)) + bytes > CV_RING) cv_used = 0;
+    for (int i = 0; i < count; i++)
+        if (movable & (UINT32_C(1) << i)) cv_shadow(ex, bindings[i].info, align, bindings[i].written);
 }
 
 static void cv_barrier(VkExec *ex, VkPipelineStageFlags2 src, VkAccessFlags2 sa, VkPipelineStageFlags2 dst, VkAccessFlags2 da) {
@@ -1349,15 +1408,19 @@ static void cv_after(VkExec *ex) {
         cv_barrier(ex, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                    VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
     }
+    // A later dispatch may wrap the ring and overwrite blocks read by this dispatch.
+    if (vk_mem_shadow_active())
+        cv_barrier(ex, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+                   VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
     cv_n = 0;
     if (cv_total >= 36000) {
-        rt_log("vk_exec: %llu storage blocks of dispatches moved to VRAM, %llu left in guest memory for overlapping",
+        rt_log("vk_exec: %llu storage blocks of dispatches moved to VRAM, %llu left in place for overlapping bindings",
                (unsigned long long)cv_total, (unsigned long long)cv_overlaps);
         cv_total = cv_overlaps = 0;
     }
 }
 
-static VkDescriptorBufferInfo ssbo_info(VkExec *ex, int st, const GfxShaderRes *r, int written) {
+static VkDescriptorBufferInfo ssbo_info(VkExec *ex, int st, const GfxShaderRes *r, int written, int *move) {
     pc_stage = st;
     if (!__atomic_load_n(&LIM.ubo_max, __ATOMIC_ACQUIRE)) limits_init();
     uint64_t max = LIM.sbo_max, align = LIM.sbo_align;
@@ -1380,11 +1443,14 @@ static VkDescriptorBufferInfo ssbo_info(VkExec *ex, int st, const GfxShaderRes *
                        (unsigned long long)bi.range, written ? "written" : "read only", have ? sp.cls : -1,
                        !have ? "not backed" : !sp.pool ? "device memory" : bi.buffer == sp.buffer ? "IMPORTED guest memory" : "VRAM mirror");
             }
-            if (twin_dispatch && cv_on()) {
+            if (move && bi.range <= CV_MAX_BLOCK && (bi.offset | bi.range) % 4 == 0) {
                 VkMemSpan sp;
-                if (vk_mem_resolve(b->addr - lead, 1, &sp)) cv_shadow(ex, &bi, &sp, align, written);
+                *move = vk_mem_resolve(b->addr - lead, 1, &sp) && sp.pool && bi.buffer == sp.buffer;
+            } else if (!vk_mem_shadow_active() && twin_dispatch && cv_on()) {
+                VkMemSpan sp;
+                if (vk_mem_resolve(b->addr - lead, 1, &sp)) cv_shadow_direct(ex, &bi, &sp, align, written);
             }
-            if (written && bi.buffer != VK_NULL_HANDLE) note_written(ex, b->addr - lead, bi.range);
+            if (written && bi.buffer != VK_NULL_HANDLE) vk_exec_note_written(ex, b->addr - lead, bi.range);
             return bi;
         }
         if (b->addr) warn_once(W_SSBO_ALIGN, "storage buffer %#llx is not backed or not aligned: a zero buffer is bound",
@@ -2229,6 +2295,8 @@ static void bind_resources(VkExec *ex, const VkPipeInfo *info) {
         lo[s] = i0, hi[s] = i1, i0 = i1;
         if (i1 > lo[s] && !info->tpl[s]) need_w = 1;
     }
+    CvBinding cv_bindings[CV_BLOCKS];
+    int cv_count = 0, use_cv = twin_dispatch && vk_mem_shadow_active() && cv_on();
     uint32_t nd = 0;
     for (uint32_t i = 0; i < info->n_bindings; i++) {
         const VkPipeBinding *b = &info->bindings[i];
@@ -2257,7 +2325,12 @@ static void bind_resources(VkExec *ex, const VkPipeInfo *info) {
         } else if (b->kind == GFX_RES_UBO) {
             for (uint32_t k = 0; k < cnt; k++) o[k].buffer = ubo_info(ex, st, r->slot + (int)k);
         } else if (b->kind == GFX_RES_SSBO) {
-            for (uint32_t k = 0; k < cnt; k++) o[k].buffer = ssbo_info(ex, st, r, r->flags & 1);
+            if (cnt > (uint32_t)(CV_BLOCKS - cv_count)) use_cv = 0;
+            for (uint32_t k = 0; k < cnt; k++) {
+                int move = 0;
+                o[k].buffer = ssbo_info(ex, st, r, r->flags & 1, use_cv ? &move : NULL);
+                if (use_cv) cv_bindings[cv_count++] = (CvBinding){&o[k].buffer, move, r->flags & 1};
+            }
         } else if (b->kind == GFX_RES_TEX || b->kind == GFX_RES_IMG) {
             int img = b->kind == GFX_RES_IMG;
             if (b->type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER || b->type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER) {
@@ -2283,6 +2356,11 @@ static void bind_resources(VkExec *ex, const VkPipeInfo *info) {
         } else {
             rt_fatal("vk: binding %u has an unknown kind %d", (unsigned)b->binding, (int)b->kind);
         }
+        if (use_cv && kind == 0 && b->kind != GFX_RES_SSBO) {
+            if (cnt > (uint32_t)(CV_BLOCKS - cv_count)) use_cv = 0;
+            else for (uint32_t k = 0; k < cnt; k++)
+                cv_bindings[cv_count++] = (CvBinding){.info = &o[k].buffer};
+        }
         if (need_w) {
             w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                                           .dstBinding = b->binding, .descriptorCount = cnt, .descriptorType = b->type};
@@ -2292,6 +2370,7 @@ static void bind_resources(VkExec *ex, const VkPipeInfo *info) {
         }
         nd += cnt;
     }
+    if (use_cv) cv_prepare(ex, cv_bindings, cv_count);
     // Under the validation layer, a new graphics layout binds set 1 before set 0 is pushed or bound. The layer (SDK
     // 1.4.363, PipelineLayoutCompatDef::operator==) takes any two INDEPENDENT_SETS layouts as compatible, so
     // vkCmdPushDescriptorSetKHR keeps the push set it made for an earlier layout and drops writes to bindings that
@@ -2392,11 +2471,57 @@ static void bind_pipeline(VkExec *ex, VkPipelineBindPoint bp, VkPipeline p) {
     if (!k) B.st_valid = 0;
 }
 
+// Violet draws its UI into the same image after the tone-map composite. Keep
+// those draws in the middle 16:9 area; scene and offscreen UI passes stay wide.
+// This hash was identified in a live Violet 4.0.0 KarPur frame: its draw into
+// the wide output image is followed by the UI's 560-byte vertex-uniform draws.
+#define SV_COMPOSITE_FS 0x931a23c4001ccd95ull
+static uint64_t sv_shader_hash(const GfxShader *sh) {
+    static struct { const GfxShader *shader; uint64_t hash; } cache[512];
+    static unsigned next;
+    for (unsigned i = 0; i < 512; i++)
+        if (cache[i].shader == sh) return cache[i].hash;
+    uint64_t words = 0, hash = 0xcbf29ce484222325ull;
+    const uint8_t *bytes = (const uint8_t *)gfx_shader_spirv(sh, &words);
+    for (uint64_t i = 0; bytes && i < words * 4; i++) hash = (hash ^ bytes[i]) * 0x100000001b3ull;
+    cache[next % 512] = (typeof(cache[0])){sh, hash};
+    next++;
+    return hash;
+}
+
+static int sv_ui_fit_for(VkExec *ex, const GfxShader *vs, const GfxShader *fs) {
+    static const GfxShader *composite_fs, *fullscreen_vs;
+    static VkImage ui_image;
+    if (!res_sv_ui_fit() || !ex->pass_ncolor) return 0;
+    if (fs && !composite_fs && sv_shader_hash(fs) == SV_COMPOSITE_FS) composite_fs = fs;
+    if (fs && fs == composite_fs) {
+        ui_image = ex->color[0].image;
+        fullscreen_vs = vs;
+        static int logged;
+        if (!logged++) rt_log("vk_exec: Violet composite found; subsequent UI draws use centred 16:9");
+        return 0;
+    }
+    return ui_image && ex->color[0].image == ui_image && vs != fullscreen_vs;
+}
+
 static void record_fixed(VkExec *ex) {
     VkCommandBuffer cb = ex->cb;
     if (ex->dirty & VK_EXEC_DIRTY_VIEWPORT) {
         float x = 0, y = 0, w = (float)ex->pass_w, h = (float)ex->pass_h;
         if (ex->has_vp) x = ex->vp[0][0], y = ex->vp[0][1], w = ex->vp[0][2], h = ex->vp[0][3];
+        if (ex->ui_fit) {
+            if (ex->pass_w * 9ull > ex->pass_h * 16ull) {
+                float fit = (float)ex->pass_h * 16.0f / 9.0f;
+                float scale = fit / (float)ex->pass_w;
+                x = ((float)ex->pass_w - fit) * 0.5f + x * scale;
+                w *= scale;
+            } else if (ex->pass_w * 9ull < ex->pass_h * 16ull) {
+                float fit = (float)ex->pass_w * 9.0f / 16.0f;
+                float scale = fit / (float)ex->pass_h;
+                y = ((float)ex->pass_h - fit) * 0.5f + y * scale;
+                h *= scale;
+            }
+        }
         if (w < 1) w = 1;
         if (h < 1) h = 1;
         if (vk_taa_on()) vk_taa_viewport(ex, &x, &y);   // KarPur TOTK_DLAA: the sub-pixel jitter of scene passes
@@ -2904,13 +3029,17 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
     if (fs && shader_skipped(fs, &vk_exec_last_fs)) return 0;
     vk_exec_hazard_draw(ex, vs, fs);   // barrier tracking: may restart the pass behind a full barrier
     if (cp_on()) cp_draw(ex, vs, fs);  // KarPur TOTK_CAM_PROBE (diagnostic)
-    if (vk_taa_on() && vk_taa_need_scene() && ex->depth.image && ex->color[3].image) {   // KarPur TOTK_DLAA: the camera
+    if (((vk_taa_on() && vk_taa_need_scene()) || vk_lighting_need_scene()) &&
+        ex->depth.image && ex->color[3].image) {   // scene camera for temporal AA and optional screen-space lighting
         const p_bind_buf *u = &ex->ubo[NVN_STAGE_VS][2];   // c5: the view-projection at +0, the projection at +0x80
         float m[32];
         VkMemSpan sp;
         if (u->addr && u->size >= 0xc0 && (upd_read(ex, u->addr, m, 64) || (vk_mem_resolve(u->addr, 64, &sp) && memcpy(m, (const void *)(uintptr_t)u->addr, 64))) &&
             (upd_read(ex, u->addr + 0x80, m + 16, 64) || (vk_mem_resolve(u->addr + 0x80, 64, &sp) && memcpy(m + 16, (const void *)(uintptr_t)(u->addr + 0x80), 64))))
-            vk_taa_note_scene(ex, m, m + 16);
+        {
+            if (vk_taa_on() && vk_taa_need_scene()) vk_taa_note_scene(ex, m, m + 16);
+            if (vk_lighting_need_scene()) vk_lighting_note_scene(ex, m + 16);
+        }
     }
     uint32_t fbl = feedback_prepare(ex, fs);
     VkPipeState s = ex->pipe;
@@ -3007,6 +3136,11 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
         vkCmdSetRasterizerDiscardEnable(ex->cb, VK_TRUE);
         ex->recorded++;
         B.st_valid = 0;
+    }
+    int ui_fit = sv_ui_fit_for(ex, vs, fs);
+    if (ex->ui_fit != ui_fit) {
+        ex->ui_fit = ui_fit;
+        ex->dirty |= VK_EXEC_DIRTY_VIEWPORT | VK_EXEC_DIRTY_SCISSOR;
     }
     record_fixed(ex);
     repeat_stats(ex, info);
@@ -3331,7 +3465,7 @@ static void op_update_ub(VkExec *ex, const p_update_ub *u) {
     vk_usnap_drop(u->dst, u->size);
     ex->recorded++;
     vk_mem_count(sp.cls, VK_MUSE_GPU_WRITE, u->size);
-    note_written(ex, u->dst, u->size);
+    vk_exec_note_written(ex, u->dst, u->size);
     upd_note(ex, u);
 }
 
@@ -3426,7 +3560,10 @@ void vk_exec_op_draw(VkExec *ex, uint32_t op, const void *payload) {
         uint64_t before = vk_exec_frame.draws;
         if (op == OP_DRAW) op_draw(ex, payload);
         else op_draw_idx(ex, payload);
-        if (vk_exec_frame.draws != before && vk_taa_on()) vk_taa_after_draw(ex, vk_exec_last_fs);   // KarPur TOTK_DLAA
+        if (vk_exec_frame.draws != before) {
+            if (vk_lighting_on()) vk_lighting_after_draw(ex, vk_exec_last_fs);
+            if (vk_taa_on()) vk_taa_after_draw(ex, vk_exec_last_fs);
+        }
         break;
     }
     case OP_DISPATCH: op_dispatch(ex, payload); break;

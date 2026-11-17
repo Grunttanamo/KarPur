@@ -443,7 +443,8 @@ static void defer_init(void) {
     if (defer_mode) {
         rt_log("vk: submits are deferred until the next submit, a present, an upload or a wait, at most %llu us "
                "(TOTK_SUBMIT_DEFER=1)", (unsigned long long)defer_us);
-        if (!plat_thread_spawn(defer_timer, NULL, "submit defer", 64 << 10)) rt_log("vk: defer timer thread failed");
+        // The Vulkan driver can need far more than 64 KiB while this worker submits commands (issue #69).
+        if (!plat_thread_spawn(defer_timer, NULL, "submit defer", 0)) rt_log("vk: defer timer thread failed");
     }
 }
 

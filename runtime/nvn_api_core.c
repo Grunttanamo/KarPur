@@ -13,6 +13,7 @@
 #include "cfg.h"
 #include "gfx.h"
 #include "host.h"
+#include "kernel.h"
 #include "nvn_api.h"
 #include "nvn_pool_index.h"
 #include "platform/platform.h"
@@ -298,6 +299,24 @@ NVN_API(nvnMemoryPoolInitialize) {
         rt_log("shadow probe: pool %#llx..%#llx, %llu MiB, flags %#x",
                (unsigned long long)(uintptr_t)o->game_mem,
                (unsigned long long)((uintptr_t)o->game_mem + o->size), (unsigned long long)(o->size >> 20), o->flags);
+    // Read-only correlation: Violet's static GlobalHeap is initialized before these large NVN pools.
+    if (ok && o->size >= (32u << 20) && rt_knob("MEM_BUDGET_TRACE", "0")) {
+        static int global_logged;
+        if (!__atomic_exchange_n(&global_logged, 1, __ATOMIC_RELAXED)) {
+            uint64_t parent = 0, total = 0;
+            if (plat_mem_read(0x7004763918ull + 0x20, &parent, sizeof parent) &&
+                plat_mem_read(0x7004763918ull + 0x28, &total, sizeof total))
+                rt_log("memory budget: Violet GlobalHeap total %.3f MiB, parent %#llx",
+                       (double)total / 1048576.0, (unsigned long long)parent);
+        }
+    }
+    if (ok && o->size >= (8u << 20) && rt_knob("MEM_BUDGET_TRACE", "0")) {
+        char at[160];
+        rt_log("memory budget: NVN pool %p, storage %#llx, %.1f MiB, flags %#x, caller %s",
+               (void *)o, (unsigned long long)(uintptr_t)o->game_mem, o->size / 1048576.0, o->flags,
+               ldr_describe(c->x[30], at, sizeof at));
+        kern_backtrace(c);
+    }
     if (ok && pool_gpu_visible(o)) index_add(o);
     if (!ok) {
         if (nvn_gpu_only((uintptr_t)o->mem)) gva_free((uintptr_t)o->mem);

@@ -158,11 +158,33 @@ NVN_API(nvnTextureBuilderGetFlags) { ret_x(c, (uint32_t)TB(c)->d.flags); }
 // companion beside it, which cost 8 and 2 MiB at the game's own 1024 and 128 and 32 at 4096. Nothing else in the
 // game is square at that side.
 static uint64_t storage_size_for_game(const nvn_texdesc *d, uint64_t size) {
-    if (!nvn_tex_shadow_grown(d)) return size;
+    int sv_host = nvn_tex_sv_host_grown(d);
+    if (nvn_tex_shadow_grown(d) && res_shadow_budget_active()) {
+        static unsigned reported;
+        if (__atomic_fetch_add(&reported, 1u, __ATOMIC_RELAXED) < 4)
+            rt_log("shadow budget test: %ux%u texture format %#x reported truthful %llu KiB to the game",
+                   d->width, d->height, d->format, (unsigned long long)(size >> 10));
+        return size;
+    }
+    if (!nvn_tex_shadow_grown(d) && !sv_host) return size;
     nvn_texdesc own = *d;
-    own.width = own.height = 1024;
+    if (sv_host) {
+        unsigned out[2];
+        res_sv_host_size(out);
+        own.width = d->width == out[0] ? 1920 : 960;
+        own.height = d->height == out[1] ? 1080 : 540;
+    }
+    else own.width = own.height = 1024;
     nvn_texlayout L;
     nvn_tex_layout(&own, &L);
+    if (sv_host) {
+        static unsigned reported;
+        if (__atomic_fetch_add(&reported, 1u, __ATOMIC_RELAXED) < 20)
+            rt_log("resolution host test: %ux%u format %#x reports %llu KiB instead of %llu KiB to the game",
+                   d->width, d->height, d->format, (unsigned long long)(L.size >> 10),
+                   (unsigned long long)(size >> 10));
+        return L.size;
+    }
     if (rt_knob("SHADOW_PROBE", "0"))
         rt_log("shadow probe: %ux%u texture fmt %#x reported to the game as %llu KiB, really %llu KiB", d->width,
                d->height, d->format, (unsigned long long)(L.size >> 10), (unsigned long long)(size >> 10));
@@ -839,5 +861,6 @@ NVN_API(nvnQueuePresentTexture) {
     coverage_present(o->presents);           // KarPur coverage.c: TOTK_COVERAGE
     rbw_present(o->presents);                // KarPur readback_watch.c: TOTK_READBACK_WATCH
     frame_dt_present();                      // KarPur frame_dt.c: the measured frame time for set fps_dt
+    sv_detail_present();                     // Violet: people and Pokemon model detail after field reloads
     rt_frame_presented(t, o->presents);
 }

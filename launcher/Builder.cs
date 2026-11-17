@@ -26,6 +26,11 @@ class Builder
     public static string Root(string target) => IsSourceRoot(target) ? Path.GetFullPath(target) : Path.Combine(target, "KarPur");
     public static string Exe(string target) => Path.Combine(Root(target), "build", "game", "karpur.exe");
     public static string Ini(string target) => Path.Combine(Root(target), "build", "game", "karpur.ini");
+    public static bool HasRenderScale(string target)
+    {
+        try { return File.ReadAllText(Path.Combine(Root(target), "build", "svhost_supported.txt")).Trim() == "1"; }
+        catch { return false; }
+    }
     public static bool HasDlc(string target)
     {
         string dir = Path.Combine(Root(target), "game", "dlc");

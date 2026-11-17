@@ -28,6 +28,7 @@
 #include "nvn_api.h"
 #include "vk.h"
 #include "vk_exec.h"
+#include "vk_lighting.h"
 #include "vk_taa.h"
 #include "platform/platform.h"
 
@@ -103,6 +104,7 @@ static void present_image(const tex_t *t, const int crop[4], uint64_t at_ns, uin
     static volatile int32_t n_skipped;
     vk_exec_frame_log(t, frame);
     vk_cam_probe_frame(t, frame);
+    vk_lighting_frame();
     int taa_up = vk_taa_frame();   // KarPur TOTK_DLAA: the next frame's jitter, this frame's camera kept
     vk_mem_census(frame);
     if (vk_dump_armed) vk_dump_present(frame);

@@ -101,7 +101,7 @@ static class SelfCheck
                 Install.PinLauncher(pinned, [1, 2, 3]);
                 Check(File.ReadAllText(installed) == "synthetic AppImage" &&
                     File.ReadAllText(Path.Combine(pinned, ".karpur-linux-launcher-version")) == Program.BuildRevision,
-                    "0.3.8 release replaces the obsolete 0.3.8.10 Deck launcher");
+                    "0.4.0 release replaces the obsolete 0.3.8.10 Deck launcher");
                 File.WriteAllText(installed, "newer launcher");
                 File.WriteAllText(Path.Combine(pinned, ".karpur-linux-launcher-version"), "99.0.0");
                 Install.PinLauncher(pinned, [1, 2, 3]);
@@ -132,13 +132,18 @@ static class SelfCheck
             File.WriteAllText(Install.Game(install), "synthetic");
             string iniPath = Path.Combine(install, "build", "game", "karpur.ini");
             File.WriteAllText(iniPath, "# keep this\n[display]\nvolume = 75\n");
+            File.WriteAllText(Path.Combine(install, "build", "svhost_supported.txt"), "1\n");
             Install.SaveSettings(install, "60", "1280x800", true, "fsr", "fifo", "fps",
-                gpu: "Synthetic GPU", safeSubmit: true);
+                gpu: "Synthetic GPU", safeSubmit: true, keepHotMemory: true, outputRes: "800x450");
             var ini = new Ini(iniPath);
             Check(ini.Get("operation_mode") == "handheld" && ini.Get("vk_present") == "fifo" &&
                 ini.Get("perf_overlay") == "fps" && ini.Get("gpu_name") == "Synthetic GPU" &&
-                ini.Get("submit_defer") == "0" && ini.Get("volume") == "75" &&
+                ini.Get("submit_defer") == "0" && ini.Get("hot_cool") == "0" &&
+                ini.Get("output_res") == "800x450" && ini.Get("svhost_test") == "1" && ini.Get("volume") == "75" &&
                 File.ReadAllText(iniPath).Contains("# keep this"), "settings preserve existing values and comments");
+            Install.SaveSettings(install, "60", "1280x800", true, "fsr", "fifo", "fps",
+                gpu: "Synthetic GPU", safeSubmit: true, keepHotMemory: false);
+            Check(new Ini(iniPath).Get("hot_cool") == "300", "hot memory compatibility switch restores the default");
             string profile = Install.Profile(install);
             Directory.CreateDirectory(profile);
             File.WriteAllBytes(Path.Combine(profile, "account.uid"), Enumerable.Range(0, 16).Select(i => (byte)i).ToArray());

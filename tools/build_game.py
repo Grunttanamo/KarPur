@@ -84,6 +84,7 @@ else:
     LINK_FLAGS = ['-fuse-ld=lld', '-no-pie', '-Wl,-z,noexecstack', "'-Wl,-rpath,$$ORIGIN'",
                   '"-Wl,-Map=$builddir/karpur.map"']
     LINK_LIBS = ['-lvulkan', '-lSDL3', '-lopus', '-lvpx', '-lzstd', '-l:libstdc++.a', '-lm', '-lpthread', '-ldl']
+    RT_FLAGS.append('-DFFX_GCC')   # AMD FSR 2: FFX_API has no Windows __declspec on Linux
     VMA_INCLUDE = Path('/usr/include')   # vk_mem_alloc.h; Arch (AUR) vulkan-memory-allocator, Debian libvulkan-memory-allocator-dev
     if os.environ.get('KARPUR_LINUX_PREFIX'):
         prefix = Path(os.environ['KARPUR_LINUX_PREFIX']).resolve().as_posix()
@@ -241,7 +242,11 @@ def runtime_sources(skip=()):
     names in skip, so a task adds a file without editing this script."""
     pats = ('*.c', '*.cpp', 'platform/*.c', '*.rc', 'ui/*.cpp', 'third_party/imgui/*.cpp',
             'third_party/imgui/backends/*.cpp')
-    return sorted(p for pat in pats for p in RUNTIME.glob(pat) if p.name not in skip and not other_os(p.name))
+    sources = [p for pat in pats for p in RUNTIME.glob(pat) if p.name not in skip and not other_os(p.name)]
+    # AMD FSR 2.2's MIT core and Vulkan backend. Its shaders are embedded as precompiled SPIR-V.
+    fsr2 = RUNTIME / 'third_party' / 'fsr2'
+    sources += [fsr2 / 'ffx_fsr2.cpp', fsr2 / 'ffx_assert.cpp', fsr2 / 'vk' / 'ffx_fsr2_vk.cpp']
+    return sorted(sources)
 
 
 def runtime_object(out, src):
@@ -778,6 +783,10 @@ def main():
             LINK_LIBS[LINK_LIBS.index(f'-l:lib{lib}.a')] = cmd_path(DEPS / 'lib' / f'lib{lib}.a')
         LINK_LIBS.append(cmd_path(DEPS / 'lib' / 'libclang_rt.builtins-x86_64.a'))
         LINK_FLAGS[:] = [flag for flag in LINK_FLAGS if '-Map=' not in flag]
+        # Zig's bundled glibc target predates the SDL/Vulkan libraries copied from the Linux packaging host. Their
+        # versioned libc references are resolved by the player's loader, not by the executable's link step. LLD's
+        # default --no-allow-shlib-undefined rejects them before the game can be built on Steam Deck.
+        LINK_FLAGS.append('-Wl,--allow-shlib-undefined')
     if args.sysroot and not WIN:
         # Every compile and the link: the game then needs no newer glibc than the sysroot's (the Steam Runtime's)
         sysroot = ['--target=x86_64-linux-gnu', f'--sysroot={cmd_path(args.sysroot.resolve())}']
@@ -855,6 +864,9 @@ def main():
     text, objs, exe = ninja_file(gen, out, mods, jobs, skip, pairs is not None, runtime_lib,
                                  args.make_runtime_lib)
     write_if_changed(out / 'build.ninja', text)
+    for group in objs.values():
+        for obj in group:
+            obj.parent.mkdir(parents=True, exist_ok=True)
 
     env = dict(os.environ)
     if WIN or TOOLCHAIN_BIN:

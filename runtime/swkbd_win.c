@@ -4,6 +4,7 @@
 // buttons work too.
 //   TOTK_SWKBD_TEST=ok|cancel   open the window, then press OK / Cancel on the first timer tick
 #include <windows.h>
+#include <dwmapi.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,33 @@ typedef struct {
     int test;                            // TOTK_SWKBD_TEST: 1 press OK, -1 press Cancel
 } Entry;
 
+static HBRUSH dialog_bg, edit_bg;
+static const COLORREF text_color = RGB(239, 232, 255), muted_color = RGB(185, 174, 207);
+
+static void draw_button(const DRAWITEMSTRUCT *d) {
+    int primary = d->CtlID == IDOK;
+    COLORREF fill = primary ? RGB(146, 100, 235) : RGB(56, 47, 85);
+    if (d->itemState & ODS_SELECTED) fill = primary ? RGB(117, 78, 202) : RGB(72, 61, 108);
+    // Owner-drawn buttons inherit the system button background. Cover the whole
+    // rectangle before drawing rounded corners so none of that white shows.
+    FillRect(d->hDC, &d->rcItem, dialog_bg);
+    HBRUSH brush = CreateSolidBrush(fill);
+    HPEN pen = CreatePen(PS_SOLID, 1, d->itemState & ODS_FOCUS ? RGB(185, 150, 255) : fill);
+    HGDIOBJ old_brush = SelectObject(d->hDC, brush), old_pen = SelectObject(d->hDC, pen);
+    RoundRect(d->hDC, d->rcItem.left, d->rcItem.top, d->rcItem.right, d->rcItem.bottom, 10, 10);
+    SelectObject(d->hDC, old_brush), SelectObject(d->hDC, old_pen);
+    DeleteObject(brush), DeleteObject(pen);
+    SetBkMode(d->hDC, TRANSPARENT);
+    SetTextColor(d->hDC, text_color);
+    wchar_t caption[64];
+    GetWindowTextW(d->hwndItem, caption, 64);
+    RECT r = d->rcItem;
+    HFONT button_font = (HFONT)SendMessageW(d->hwndItem, WM_GETFONT, 0, 0);
+    HGDIOBJ old_font = button_font ? SelectObject(d->hDC, button_font) : NULL;
+    DrawTextW(d->hDC, caption, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    if (old_font) SelectObject(d->hDC, old_font);
+}
+
 static wchar_t *wide(const char *utf8, wchar_t *buf, int cap) {
     if (!MultiByteToWideChar(CP_UTF8, 0, utf8, -1, buf, cap)) buf[0] = 0;
     return buf;
@@ -59,6 +87,23 @@ static LRESULT CALLBACK edit_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
 static LRESULT CALLBACK entry_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     Entry *e = (Entry *)GetWindowLongPtrW(h, GWLP_USERDATA);
     switch (m) {
+    case WM_ERASEBKGND: {
+        RECT r;
+        GetClientRect(h, &r);
+        FillRect((HDC)w, &r, dialog_bg);
+        return 1;
+    }
+    case WM_CTLCOLORSTATIC:
+        SetBkMode((HDC)w, TRANSPARENT);
+        SetTextColor((HDC)w, GetDlgCtrlID((HWND)l) == -1 ? text_color : muted_color);
+        return (LRESULT)dialog_bg;
+    case WM_CTLCOLOREDIT:
+        SetBkColor((HDC)w, RGB(48, 40, 72));
+        SetTextColor((HDC)w, text_color);
+        return (LRESULT)edit_bg;
+    case WM_DRAWITEM:
+        if (w == IDOK || w == IDCANCEL) { draw_button((const DRAWITEMSTRUCT *)l); return TRUE; }
+        break;
     case WM_COMMAND:
         if (LOWORD(w) == IDOK) finish(e, 1);
         else if (LOWORD(w) == IDCANCEL) finish(e, -1);
@@ -93,8 +138,10 @@ static HWND child(HWND parent, const wchar_t *cls, const wchar_t *text, DWORD st
 int text_entry_run(const SwkbdRequest *req, uint16_t *out, size_t cap, size_t *n) {
     static const wchar_t cls[] = L"KarPurTextEntry";
     HINSTANCE inst = GetModuleHandleW(NULL);
+    if (!dialog_bg) dialog_bg = CreateSolidBrush(RGB(26, 21, 43));
+    if (!edit_bg) edit_bg = CreateSolidBrush(RGB(48, 40, 72));
     WNDCLASSEXW wc = {.cbSize = sizeof wc, .lpfnWndProc = entry_proc, .hInstance = inst,
-                      .hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW), .hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1),
+                      .hCursor = LoadCursorW(NULL, (LPCWSTR)IDC_ARROW), .hbrBackground = dialog_bg,
                       .lpszClassName = cls};
     if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
         rt_fatal("nn::swkbd::ShowKeyboard: RegisterClassEx (error %lu)", GetLastError());
@@ -108,14 +155,15 @@ int text_entry_run(const SwkbdRequest *req, uint16_t *out, size_t cap, size_t *n
     UINT dpi = owner ? GetDpiForWindow(owner) : GetDpiForSystem();
     NONCLIENTMETRICSW ncm = {.cbSize = sizeof ncm};
     SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0, dpi);
-    HFONT font = CreateFontIndirectW(&ncm.lfMessageFont);
+    HFONT font = CreateFontW(-MulDiv(17, dpi, 96), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     HDC dc = GetDC(NULL);
     HGDIOBJ old = SelectObject(dc, font);
     TEXTMETRICW tm;
     GetTextMetricsW(dc, &tm);
     SelectObject(dc, old);
     ReleaseDC(NULL, dc);
-    int u = tm.tmHeight > 8 ? tm.tmHeight : 16, pad = u, cw = 26 * u, bw = 6 * u, bh = u * 9 / 5;
+    int u = tm.tmHeight > 8 ? tm.tmHeight : 20, pad = u, cw = 30 * u, bw = 6 * u, bh = u * 2;
     int y_prompt = pad, h_prompt = u * 5 / 2, y_edit = y_prompt + h_prompt + u / 4, h_edit = u * 9 / 5;
     int y_hint = y_edit + h_edit + u / 2, y_btn = y_hint + u * 3 / 2, ch = y_btn + bh + pad;
 
@@ -132,6 +180,8 @@ int text_entry_run(const SwkbdRequest *req, uint16_t *out, size_t cap, size_t *n
     e.wnd = CreateWindowExW(ex, cls, wide(ui_text(UI_SWKBD_TITLE), title, 128), style, x, y, ww, wh, owner, NULL, inst,
                             NULL);
     if (!e.wnd) rt_fatal("nn::swkbd::ShowKeyboard: CreateWindowEx (error %lu)", GetLastError());
+    BOOL dark = TRUE;
+    DwmSetWindowAttribute(e.wnd, 20, &dark, sizeof dark);
     SetWindowLongPtrW(e.wnd, GWLP_USERDATA, (LONG_PTR)&e);
     wchar_t prompt[0x102];
     if (req->prompt[0]) memcpy(prompt, req->prompt, sizeof req->prompt), prompt[0x101] = 0;
@@ -141,10 +191,10 @@ int text_entry_run(const SwkbdRequest *req, uint16_t *out, size_t cap, size_t *n
                    WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | (req->password ? ES_PASSWORD : 0) | (req->numeric ? ES_NUMBER : 0),
                    pad, y_edit, cw, h_edit, 100, font);
     child(e.wnd, L"STATIC", wide(ui_text(UI_SWKBD_PAD_HINT), hint, 160), SS_LEFT | SS_NOPREFIX, pad, y_hint, cw, u * 3 / 2,
-          -1, font);
-    child(e.wnd, L"BUTTON", wide(ui_text(UI_SWKBD_OK), ok, 64), WS_TABSTOP | BS_DEFPUSHBUTTON, pad + cw - 2 * bw - u / 2,
+          -2, font);
+    child(e.wnd, L"BUTTON", wide(ui_text(UI_SWKBD_OK), ok, 64), WS_TABSTOP | BS_OWNERDRAW, pad + cw - 2 * bw - u / 2,
           y_btn, bw, bh, IDOK, font);
-    child(e.wnd, L"BUTTON", wide(ui_text(UI_SWKBD_CANCEL), cancel, 64), WS_TABSTOP | BS_PUSHBUTTON, pad + cw - bw, y_btn,
+    child(e.wnd, L"BUTTON", wide(ui_text(UI_SWKBD_CANCEL), cancel, 64), WS_TABSTOP | BS_OWNERDRAW, pad + cw - bw, y_btn,
           bw, bh, IDCANCEL, font);
     SendMessageW(e.edit, EM_LIMITTEXT, (WPARAM)req->max_len, 0);
     e.edit_proc = (WNDPROC)SetWindowLongPtrW(e.edit, GWLP_WNDPROC, (LONG_PTR)edit_proc);

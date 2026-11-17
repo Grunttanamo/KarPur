@@ -89,6 +89,8 @@ static int shadow_on;                    // shadow mode: imported pools get shad
 static int shadow_pool(VkCtx *c, PoolRec *r, uint64_t addr, uint64_t size);
 static void shadow_touch(PoolRec *r);
 static void shadow_forget(PoolRec *r);
+static void mbarrier(VkCommandBuffer cb, VkPipelineStageFlags2 ss, VkAccessFlags2 sa, VkPipelineStageFlags2 ds,
+                     VkAccessFlags2 da);
 static void mirror_retiring(PoolRec *r);  // vk_pool_fini: kept until mirror_retire (or vk_mem_shutdown)
 static void mirror_retire(void *arg);    // completion thread: destroys a finalized mirrored pool's record
 static void grow(void **arr, int *cap, size_t elem);
@@ -846,15 +848,16 @@ static int query_stamp(uint64_t lo, uint64_t hi, uint32_t g) {
 // - CPU -> shadow: right before each submit (vk_mem_shadow_sync), the pools the replay resolved since the last one are
 //   queried for written pages; pages stamped after a pool's sgen are copied in by the CPU.
 // - GPU -> guest: the replay notes each GPU write into CPU-visible memory at record time (vk_mem_gpu_pending) and
-//   reports it at the fence (vk_gpu_written), which copies those bytes back into guest memory. Until then the CPU
-//   copies skip them: a page the CPU and the GPU both write keeps the GPU's bytes.
+//   reports it at the fence (vk_gpu_written), which copies those bytes back into guest memory. A write starts
+//   blocking CPU copies after its command buffer is submitted, so read-modify-write commands get fresh inputs.
 // TOTK_SHADOW=1/0 forces the mode on or off; the default is on for Linux.
 typedef struct { uint64_t lo, hi; } SRange;
 static PlatMutex shadow_lock = PLAT_MUTEX_INIT;   // after pool_lock; before gen_lock
 static PoolRec **stouch;                          // shadow_lock: pools resolved since the last sync
 static int nstouch, cstouch;
 static SRange *spend;                             // shadow_lock: GPU writes recorded and not copied back yet
-static int nspend, cspend;
+static int nspend, cspend, nspend_submitted;       // the submitted ranges form a prefix of spend
+static int shadow_writeback;                      // this submission needs a host-read barrier, even after a split
 static int64_t s_live_n, s_live_bytes;            // shadow_lock
 static uint64_t s_syncs, s_copied, s_queries, s_untracked, s_wb_bytes, s_ticks;   // shadow_lock: since the last log
 
@@ -907,10 +910,10 @@ static void shadow_forget(PoolRec *r) {
     plat_mutex_unlock(&shadow_lock);
 }
 
-// shadow_lock held: copies guest [a, b) into the shadow, leaving out the bytes of GPU writes not copied back yet
-// (spend from index i on).
+// shadow_lock held: copies guest [a, b) into the shadow, leaving out GPU writes that were submitted and have
+// yet to be copied back (spend from index i on).
 static void shadow_copy(PoolRec *r, uint64_t a, uint64_t b, int i) {
-    for (; i < nspend; i++)
+    for (; i < nspend_submitted; i++)
         if (spend[i].lo < b && spend[i].hi > a) {
             if (spend[i].lo > a) shadow_copy(r, a, spend[i].lo, i + 1);
             if (spend[i].hi < b) shadow_copy(r, spend[i].hi, b, i + 1);
@@ -971,15 +974,37 @@ void vk_mem_shadow_sync(void) {
         s_syncs += (uint64_t)nstouch;
         nstouch = 0;
     }
+    nspend_submitted = nspend;
     s_ticks += qpc() - t0;
     plat_mutex_unlock(&shadow_lock);
 }
 
+int vk_mem_shadow_end(VkCommandBuffer cb) {
+    if (!shadow_on) return 0;
+    plat_mutex_lock(&shadow_lock);
+    int pending = shadow_writeback;
+    shadow_writeback = 0;
+    plat_mutex_unlock(&shadow_lock);
+    if (!pending) return 0;
+    // A fence orders the CPU read after the GPU, but a memory dependency makes the writes visible to the host.
+    mbarrier(cb, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+             VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT);
+    return 1;
+}
+
+int vk_mem_shadow_active(void) { return shadow_on; }
+
+int vk_mem_span_shadowed(const VkMemSpan *sp) {
+    const PoolRec *r = sp->pool;
+    return r && r->smap;
+}
+
 void vk_mem_gpu_pending(uint64_t addr, uint64_t size) {
-    if (!shadow_on || !size) return;
+    if (!shadow_on || !size || nvn_gpu_only(addr)) return;
     plat_mutex_lock(&shadow_lock);
     if (nspend == cspend) grow((void **)&spend, &cspend, sizeof *spend);
-    spend[nspend++] = (SRange){addr, addr + size};
+    spend[nspend++] = (SRange){.lo = addr, .hi = addr + size};
+    shadow_writeback = 1;
     plat_mutex_unlock(&shadow_lock);
 }
 
@@ -994,8 +1019,12 @@ void vk_gpu_written(uint64_t addr, uint64_t size) {
             memcpy((void *)(uintptr_t)addr, r->smap + (addr - r->import_lo), size);
             s_wb_bytes += size;
         }
-        for (int i = 0; i < nspend; i++)
-            if (spend[i].lo == addr && spend[i].hi == addr + size) { spend[i] = spend[--nspend]; break; }
+        for (int i = 0; i < nspend_submitted; i++)
+            if (spend[i].lo == addr && spend[i].hi == addr + size) {
+                spend[i] = spend[--nspend_submitted];
+                spend[nspend_submitted] = spend[--nspend];
+                break;
+            }
         plat_mutex_unlock(&shadow_lock);
         plat_mutex_unlock_shared(&pool_lock);
     }
@@ -1208,8 +1237,6 @@ static void mirror_mode(int discrete) {
         else if (!strcmp(e, "verify")) mode = 2, why = "TOTK_MEMORY=verify";
         else rt_log("mem: TOTK_MEMORY=%s is not import, mirror, verify or auto: auto", e);
     }
-    vk_mirror_on = mode > 0;
-    mirror_verify = mode == 2;
     const char *g = cfg_get("TOTK_MIRROR_GAP");
     mirror_gap = g && *g ? atoi(g) : 2;
     if (mirror_gap < 0) mirror_gap = 0;
@@ -1224,10 +1251,18 @@ static void mirror_mode(int discrete) {
 #else
     shadow_on = !sh || !*sh || strcmp(sh, "0");
 #endif
-    if (shadow_on) rt_log("mem: shadow storage: CPU-visible pools are host-visible copies of guest memory, not imports%s",
-                          sh && *sh ? " (TOTK_SHADOW)" : "");
-    rt_log("mem: mode %s (%s): %s", mode == 2 ? "verify" : mode ? "mirror" : "import", why,
-           mode ? "pools used as buffers get a device-local mirror" : "every CPU-visible pool is imported host memory");
+    // The mirror's hot bindings assume r->buf directly aliases guest memory. With shadow storage, those
+    // bindings read a second copy that can be stale while newer GPU output is still in the mirror.
+    vk_mirror_on = !shadow_on && mode > 0;
+    mirror_verify = !shadow_on && mode == 2;
+    if (shadow_on) {
+        rt_log("mem: mode shadow: CPU-visible pools use host-visible copies (VRAM mirrors off)");
+        if (mode && strcmp(e, "auto"))
+            rt_log("mem: TOTK_MEMORY=%s requires host imports (TOTK_SHADOW=0)", e);
+    } else {
+        rt_log("mem: mode %s (%s): %s", mode == 2 ? "verify" : mode ? "mirror" : "import", why,
+               mode ? "pools used as buffers get a device-local mirror" : "every CPU-visible pool is imported host memory");
+    }
 }
 
 static void range_add(MRange **a, int *n, int *cap, PoolRec *r, uint64_t off, uint64_t size) {
@@ -1844,7 +1879,12 @@ void vk_mem_gpu_wrote(const VkMemSpan *sp, uint64_t size) {
 }
 
 void nvn_pool_flushed(const pool_t *p, uint64_t off, uint64_t size) {
-    if (!vk_mirror_on || !size || !p->mem) return;
+    if (!size || !p->mem) return;
+    if (shadow_on) {
+        vk_guest_written((uintptr_t)p->mem + off, size);
+        return;
+    }
+    if (!vk_mirror_on) return;
     plat_inc64(&m_flush_calls);
     plat_add64(&m_flush_bytes, (int64_t)size);
     plat_mutex_lock_shared(&pool_lock);
@@ -2723,7 +2763,7 @@ void vk_mem_shutdown(void) {
     pool_index.n = 0;
     nm = npend = nwbl = 0;   // mirrors went with their pools
     plat_mutex_lock(&shadow_lock);
-    nstouch = nspend = 0;   // shadows too
+    nstouch = nspend = nspend_submitted = shadow_writeback = 0;   // shadows too
     s_live_n = s_live_bytes = 0;
     plat_mutex_unlock(&shadow_lock);
     for (int i = 0; i < nretiring; i++) destroy_rec(c, retiring[i]);   // finalized ones whose callback never ran

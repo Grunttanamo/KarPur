@@ -1212,13 +1212,34 @@ VkBuffer vk_exec_inline_buffer(VkDeviceSize size) {
 
 VkRect2D vk_exec_scissor(const VkExec *ex) {
     int64_t w = ex->pass_w, h = ex->pass_h;
-    if (!ex->has_scissor) return (VkRect2D){{0, 0}, {(uint32_t)w, (uint32_t)h}};
+    int64_t left = 0, top = 0, right = w, bottom = h;
+    if (ex->ui_fit) {
+        if (w * 9 > h * 16) {
+            int64_t fit = h * 16 / 9;
+            left = (w - fit) / 2;
+            right = left + fit;
+        } else if (w * 9 < h * 16) {
+            int64_t fit = w * 9 / 16;
+            top = (h - fit) / 2;
+            bottom = top + fit;
+        }
+    }
+    if (!ex->has_scissor) return (VkRect2D){{(int32_t)left, (int32_t)top},
+                                            {(uint32_t)(right - left), (uint32_t)(bottom - top)}};
     int64_t x0 = ex->scissor.x, y0 = ex->scissor.y;
     int64_t x1 = x0 + ex->scissor.w, y1 = y0 + ex->scissor.h;
-    if (x0 < 0) x0 = 0;
-    if (y0 < 0) y0 = 0;
-    if (x1 > w) x1 = w;
-    if (y1 > h) y1 = h;
+    if (ex->ui_fit) {
+        double sx = (double)(right - left) / (double)w;
+        double sy = (double)(bottom - top) / (double)h;
+        x0 = left + (int64_t)(x0 * sx);
+        x1 = left + (int64_t)ceil(x1 * sx);
+        y0 = top + (int64_t)(y0 * sy);
+        y1 = top + (int64_t)ceil(y1 * sy);
+    }
+    if (x0 < left) x0 = left;
+    if (y0 < top) y0 = top;
+    if (x1 > right) x1 = right;
+    if (y1 > bottom) y1 = bottom;
     if (x1 <= x0 || y1 <= y0) return (VkRect2D){{0, 0}, {0, 0}};
     return (VkRect2D){{(int32_t)x0, (int32_t)y0}, {(uint32_t)(x1 - x0), (uint32_t)(y1 - y0)}};
 }
@@ -1237,6 +1258,7 @@ static int whole_target(const VkExec *ex, const VkExecTarget *t) {
 }
 
 static void clear_attachment(VkExec *ex, const VkClearAttachment *a) {
+    if (ex->ui_fit) ex->ui_fit = 0, ex->dirty |= VK_EXEC_DIRTY_VIEWPORT | VK_EXEC_DIRTY_SCISSOR;
     vk_exec_pass_begin(ex);
     VkClearRect cr = {vk_exec_scissor(ex), 0, ex->pass_layers};
     if (!cr.rect.extent.width || !cr.rect.extent.height) return;
@@ -1247,6 +1269,7 @@ static void clear_attachment(VkExec *ex, const VkClearAttachment *a) {
 
 static void clear_color(VkExec *ex, const p_clear_color *c) {
     vk_exec_frame.clears++;
+    if (ex->ui_fit) ex->ui_fit = 0, ex->dirty |= VK_EXEC_DIRTY_VIEWPORT | VK_EXEC_DIRTY_SCISSOR;
     if (ex->render_disabled) return;
     resolve_rt(ex);
     int i = c->index;
@@ -1278,6 +1301,7 @@ static void clear_color(VkExec *ex, const p_clear_color *c) {
 }
 
 static void clear_ds(VkExec *ex, const p_clear_ds *c) {
+    if (ex->ui_fit) ex->ui_fit = 0, ex->dirty |= VK_EXEC_DIRTY_VIEWPORT | VK_EXEC_DIRTY_SCISSOR;
     if (ex->render_disabled) return;
     resolve_rt(ex);
     const VkExecTarget *t = &ex->depth;
@@ -1336,7 +1360,9 @@ static uint64_t n_parts, n_subs;
 
 static void maybe_split(VkExec *ex) {
     if (split_n < 0) {
-        split_n = cfg_int("TOTK_SPLIT_DRAWS");
+        // A partial submit takes an early snapshot of shadow-backed vertex and instance buffers. Live host imports
+        // can see the game's later writes, but the snapshot misses them, which can flicker during foliage streaming.
+        split_n = vk_mem_shadow_active() && !cfg_is_set("TOTK_SPLIT_DRAWS") ? 0 : cfg_int("TOTK_SPLIT_DRAWS");
         if (split_n < 0) split_n = 0;
         int us = cfg_int("TOTK_SPLIT_US");
         split_ns = us > 0 ? (uint64_t)us * 1000 : 0;
@@ -1347,6 +1373,7 @@ static void maybe_split(VkExec *ex) {
     if (split_ns && kern_now_ns() - part_t0 < split_ns) return;   // split_draws stays: the next draw asks again
     split_draws = 0;
     if (ex->recorded == part_start) return;
+    ex->recorded += vk_mem_shadow_end(ex->cb);   // explicit shadow splitting: make this part's writebacks host-visible
     ex->cb = vk_sync_split();
     part_start = ex->recorded;
     part_t0 = kern_now_ns();
@@ -1506,7 +1533,10 @@ int vk_exec_record(VkCommandBuffer cb, const uint64_t *handles, int n, uint64_t 
     x_here = 0;
     uint64_t t2 = kern_now_ns();
     if (ex->recorded) vk_exec_barrier(ex);   // later submissions see this one's writes
-    if (n) ex->recorded += vk_mem_mirror_end(ex->cb, fence), vk_usnap_end(fence);   // VRAM mirror bytes the GPU wrote go back to guest memory
+    if (n) {
+        ex->recorded += vk_mem_mirror_end(ex->cb, fence) + vk_mem_shadow_end(ex->cb);
+        vk_usnap_end(fence);
+    }
     replay_walk_ns += t2 - t1;
     replay_sync_ns += t1 - t0 + kern_now_ns() - t2;
     if (ex->nviews) {
