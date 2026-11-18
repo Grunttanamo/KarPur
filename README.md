@@ -7,7 +7,7 @@
 
 *Native Windows and experimental Linux x86-64 builds with a Vulkan renderer, built on your own PC from your own copy of the game. Not an emulator.*
 
-[Download the launcher](https://github.com/Grunttanamo/KarPur/releases) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
+[Download the launcher](https://github.com/Grunttanamo/KarPur/releases) · [0.4.1 release notes](docs/releases/0.4.1.md) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
 
 [![Get it on RecompLauncher](https://recomplauncher.com/assets/press/launcher/badge-dark.svg)](https://recomplauncher.com/game/karpur) [![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/grunttanamo)
 
@@ -89,7 +89,7 @@ The information below documents the last release and remains available for refer
 > **If the game crashes, try the two independent Compatibility switches in Settings.** The original mode changes GPU submission timing; **Keep hot memory active** sets `hot_cool = 0` and can be turned off again. On supported desktop PCs, enabling Resizable BAR may also improve performance; see the [launcher guide](docs/launcher.md#die-tabs) for the general UEFI/BIOS steps. Results vary by system.
 
 > [!IMPORTANT]
-> **AMD GPU owners and Vulkan people wanted.** AMD RDNA 3 GPUs now enable the extra transform-feedback
+> **AMD GPU owners and Vulkan people wanted.** In the 0.4.1 candidate, AMD RDNA 3 GPUs enable the extra transform-feedback
 > barriers by default during character creation as an unconfirmed mitigation; set `TOTK_XFB_SYNC=0` to opt out. Flickering trees in compatibility
 > mode is also AMD-specific and hard to track down: the maintainer has no AMD card
 > and knows nobody who does. If you own one and know Vulkan or graphics debugging, your help would make a real
@@ -234,7 +234,7 @@ in the data your own copy of the game already contains; KarPur adds none.
 
 ## Getting started
 
-1. **Download** `KarPur-Launcher.exe` for Windows or `KarPur-Linux-Launcher-0.4.0.AppImage` for Linux from the [releases page](https://github.com/Grunttanamo/KarPur/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
+1. **Download** `KarPur-Launcher.exe` for Windows or `KarPur-Linux-Launcher-0.4.1.AppImage` for Linux from the [releases page](https://github.com/Grunttanamo/KarPur/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
 2. **Choose your files** in the *Setup* tab:
    - the base game (`.xci`, or an eShop `.nsp` together with a *Firmware folder*)
    - the update and DLC (`.nsp`)
