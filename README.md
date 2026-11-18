@@ -22,6 +22,8 @@ After giving it a lot of thought, I've decided to discontinue development of **K
 
 This decision wasn't made overnight, but honestly, I've reached a point where I simply don't want to continue anymore.
 
+----> By the way, check this one out: [PokiNative](https://github.com/privacymatters42069-del/PokiNative)
+
 There are several reasons behind this decision:
 
 - **Constant insults and disrespect.** Too many people seem to think it's acceptable to insult and disrespect the person working on this project.
