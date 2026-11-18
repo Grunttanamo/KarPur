@@ -3,16 +3,26 @@
   "format": 1,
   "name": "KarPur",
   "repo": "Grunttanamo/KarPur",
-  "game": {
-    "kind": "iso",
-    "label": "Your own Pokemon Scarlet or Violet base game as an XCI cartridge dump. An NSP base game also works in the KarPur Launcher Setup tab when you provide your console firmware folder."
-  },
+  "min": "0.90.0-beta.51",
   "inputs": [
+    {
+      "id": "game",
+      "label": "Your own Pokémon Scarlet or Violet XCI cartridge dump",
+      "role": "game",
+      "formats": [{ "type": "file", "extensions": ["xci"], "requires": ["keys"] }]
+    },
     {
       "id": "update",
       "label": "Update 4.0.0 (.nsp)",
       "role": "update",
-      "formats": [{ "type": "file", "extensions": ["nsp"] }]
+      "formats": [{ "type": "file", "extensions": ["nsp"], "requires": ["keys"] }]
+    },
+    {
+      "id": "dlc",
+      "label": "Optional DLC (.nsp)",
+      "role": "dlc",
+      "optional": true,
+      "formats": [{ "type": "file", "extensions": ["nsp"], "requires": ["keys"] }]
     },
     {
       "id": "keys",
@@ -22,15 +32,119 @@
     }
   ],
   "start": {
-    "program": ["KarPur/build/game/karpur.exe"]
+    "program": ["KarPur-Launcher.exe", "KarPur-Linux-Launcher.AppImage", "KarPur-Launcher-Linux"],
+    "args": ["--play", "--target", "{install}"]
   },
   "prepare": {
-    "program": ["KarPur-Launcher.exe"],
+    "program": ["KarPur-Launcher.exe", "KarPur-Linux-Launcher.AppImage", "KarPur-Launcher-Linux"],
     "args": [
-      "--prepare", "--game", "{game}", "--update", "{input:update}",
-      "--keys", "{input:keys}", "--target", "{install}"
+      "--prepare", "--game", "{input:game}", "--update", "{input:update}",
+      "--keys", "{input:keys}", "--dlc={input:dlc}", "--target", "{install}"
     ],
-    "label": "Building KarPur from your game files (30-60 minutes)",
-    "timeout": 10800
-  }
+    "label": "Build KarPur from your own game files",
+    "timeout": 10800,
+    "done": ["{install}/.karpur-recomp-ready"]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "ini",
+      "file": [
+        {
+          "path": "{install}/KarPur/build/game/karpur.ini",
+          "if": "{install}/KarPur/build/game/karpur.exe"
+        },
+        { "path": "{install}/build/game/karpur.ini" }
+      ],
+      "new": {
+        "display/fullscreen": "0",
+        "display/window_size": "1920x1080",
+        "display/vk_present": "mailbox",
+        "display/upscaler": "fsr",
+        "frame rate/fps_limit": "60"
+      }
+    }
+  ],
+  "saves": [
+    "{install}/KarPur/build/profile/save",
+    "{install}/build/profile/save"
+  ],
+  "folders": {
+    "logs": [
+      {
+        "path": "{install}/KarPur/launcher.log",
+        "if": "{install}/KarPur/build/game/karpur.exe"
+      },
+      { "path": "{install}/KarPur/build/game/logs", "if": "{install}/KarPur/build/game/karpur.exe" },
+      { "path": "{install}/build/game/logs" },
+      { "path": "{install}/launcher-linux.log" }
+    ]
+  },
+  "settings": [
+    {
+      "id": "fullscreen",
+      "label": "Display mode",
+      "help": "Fullscreen uses the monitor; windowed mode uses the selected Window size.",
+      "choices": [
+        { "label": "Windowed", "set": { "display/fullscreen": "0" } },
+        { "label": "Fullscreen", "set": { "display/fullscreen": "1" } }
+      ],
+      "defaults": { "display/fullscreen": "0" }
+    },
+    {
+      "id": "window_size",
+      "label": "Window size",
+      "help": "The size of the game window when Display mode is windowed.",
+      "choices": [
+        { "label": "1280 × 720", "set": { "display/window_size": "1280x720" } },
+        { "label": "1920 × 1080", "set": { "display/window_size": "1920x1080" } },
+        { "label": "2560 × 1440", "set": { "display/window_size": "2560x1440" } }
+      ],
+      "defaults": {
+        "display/window_size": "1920x1080",
+        "display/fullscreen": "0"
+      },
+      "when": { "display/fullscreen": "0" }
+    },
+    {
+      "id": "frame_rate",
+      "label": "Frame rate limit",
+      "help": "60 FPS is recommended. Higher limits are experimental and may affect game effects.",
+      "choices": [
+        { "label": "30 FPS", "set": { "frame rate/fps_limit": "30" } },
+        { "label": "60 FPS (recommended)", "set": { "frame rate/fps_limit": "60" } },
+        { "label": "90 FPS (experimental)", "set": { "frame rate/fps_limit": "90" } }
+      ],
+      "defaults": { "frame rate/fps_limit": "60" }
+    },
+    {
+      "id": "vsync",
+      "label": "Vulkan presentation",
+      "help": "FIFO synchronizes with the display; mailbox avoids tearing with low latency when supported.",
+      "choices": [
+        { "label": "Mailbox (recommended)", "set": { "display/vk_present": "mailbox" } },
+        { "label": "V-Sync", "set": { "display/vk_present": "fifo" } },
+        { "label": "Immediate (tearing)", "set": { "display/vk_present": "immediate" } }
+      ],
+      "defaults": { "display/vk_present": "mailbox" }
+    },
+    {
+      "id": "upscaling",
+      "label": "Image scaling",
+      "help": "FSR sharpens the image when it is scaled to the window; bilinear scaling is softer.",
+      "choices": [
+        { "label": "AMD FSR", "set": { "display/upscaler": "fsr" } },
+        { "label": "Bilinear", "set": { "display/upscaler": "bilinear" } }
+      ],
+      "defaults": { "display/upscaler": "fsr" }
+    }
+  ],
+  "actions": [
+    {
+      "id": "logs",
+      "label": "Logs",
+      "help": "Open KarPur's game and setup logs.",
+      "open": "logs"
+    }
+  ]
 }
