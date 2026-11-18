@@ -1,5 +1,9 @@
 # Progress
 
+## Project discontinuation (2026-11-18)
+
+- The maintainer announced in the README that KarPur development is discontinued. The repository remains available under its license for anyone who wants to fork or continue the project. Version 0.4.0 is the last release from the original maintainer; no further development is planned by them.
+
 ## 0.4.0 clean-install feedback (2026-11-17)
 
 - Follow-up: the maintainer confirmed the Steam Deck fresh install now builds, Windows fullscreen uses the full display, and the revised AO/indirect-light tiers work. The text-entry buttons showed white system-background pixels at their rounded corners; the owner-draw path now paints the complete button rectangle with the dialog background before drawing the rounded fill. A new local Windows test launcher was packaged, but the character-creation fix remains open.
