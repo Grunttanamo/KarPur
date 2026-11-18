@@ -9,9 +9,13 @@
 
 **Quick start:** Use your own XCI, the 4.0.0 update, and `prod.keys`; build with KarPur's launcher or RecompLauncher. RecompLauncher accepts XCI base games only because it cannot request the firmware folder needed by an NSP base game.
 
-[Download the launcher](https://github.com/Grunttanamo/KarPur/releases) · [0.4.1 release notes](docs/releases/0.4.1.md) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
+[Download the launcher]([https://github.com/privacymatters42069-del/PokiNative/releases/]) · [0.4.1 release notes](docs/releases/0.4.1.md) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
 
-<a href="https://recomplauncher.com/game/karpur"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a> [![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/grunttanamo)
+<a href="https://recomplauncher.com/game/karpur"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a> [![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/privacymatters42069-del)
+
+Please respect Grunttanamo and their decision to step away from the project, report all issues and complaints here
+
+thank you
 
 </div>
 
@@ -34,9 +38,9 @@ The information below documents the last release and remains available for refer
 > with the help of an AI assistant are very welcome too. Please open an issue or pull request; see
 > [Troubleshooting](#troubleshooting) and the open issues for what is known so far.
 
-## What is KarPur?
+## What is PokiNative?
 
-KarPur is a fan project. It takes the ARM64 code of *Pokémon Scarlet & Violet* (Nintendo Switch, 2022) and translates it into C code, which it compiles into a native Windows or Linux program. The Switch system and its graphics API are replaced by a runtime of our own, and the game draws its pictures through Vulkan.
+PokiNative is a fork of KarPur a fan project. It takes the ARM64 code of *Pokémon Scarlet & Violet* (Nintendo Switch, 2022) and translates it into C code, which it compiles into a native Windows or Linux program. The Switch system and its graphics API are replaced by a runtime of our own, and the game draws its pictures through Vulkan.
 
 In practice that means:
 - a steady **60 FPS**
@@ -188,7 +192,7 @@ Your dumps, your keys and the built game stay on your PC. A guide in German is i
 
 ### Use RecompLauncher
 
-Install KarPur from its page in RecompLauncher, then provide your own `.xci`, the 4.0.0 update, and `prod.keys` from your console; DLC is optional. RecompLauncher runs KarPur's normal build in the background and starts the game when it finishes. Its setup supports XCI base games only because RecompLauncher cannot request the firmware folder needed by an NSP base game. Use KarPur's own Setup tab for NSP.
+Install PokiNative/KarPur from its page in RecompLauncher, then provide your own `.xci`, the 4.0.0 update, and `prod.keys` from your console; DLC is optional. RecompLauncher runs the normal build in the background and starts the game when it finishes. Its setup supports XCI base games only because RecompLauncher cannot request the firmware folder needed by an NSP base game. Use the apps own Setup tab for NSP.
 
 > [!IMPORTANT]
 > **For a new game, keep Render scale at 1920×1080 until character creation is complete.** The character preview and ID photo can be misplaced or missing at other internal resolutions. After finishing character creation, change Render scale to your preferred size and restart the game. This is a temporary workaround while the capture and layout are fixed.
@@ -233,16 +237,16 @@ Exit code `3221225501` means that the processor lacks an instruction set the bui
 <details>
 <summary><b>The game crashes or freezes somewhere else</b></summary>
 
-Use the launcher's **Feedback** tab with **Attach log**, or open an [issue](https://github.com/Grunttanamo/KarPur/issues) and attach the whole `build\game\logs\karpur.log` from your target folder. Please send the whole file: the last lines alone rarely show the cause. Name your graphics card and its driver version too.
+Use the launcher's **Feedback** tab with **Attach log**, or open an [issue]([https://github.com/privacymatters42069-del/PokiNative/issues]) and attach the whole `build\game\logs\karpur.log` from your target folder. Please send the whole file: the last lines alone rarely show the cause. Name your graphics card and its driver version too.
 </details>
 
 ## Feedback
 
-KarPur is mostly tested on the maintainer's PC, so reports from other systems help a lot. The launcher's **Feedback** tab fills in:
+PokiNative is mostly tested on the maintainer's PC, so reports from other systems help a lot. The launcher's **Feedback** tab fills in:
 - your launcher version, game, update and DLC
 - your GPU, CPU, RAM and Windows version
 
-You add a few words, and with *Attach log* the end of the game's log. **Open on GitHub** opens it as a filled-in [issue](https://github.com/Grunttanamo/KarPur/issues). You need a free GitHub account for that, and reports are public. Without an account, *Copy report* copies the report for anywhere else.
+You add a few words, and with *Attach log* the end of the game's log. **Open on GitHub** opens it as a filled-in [issue]([https://github.com/privacymatters42069-del/PokiNative/issues]). You need a free GitHub account for that, and reports are public. Without an account, *Copy report* copies the report for anywhere else.
 
 ## Known limits
 
@@ -262,7 +266,7 @@ You add a few words, and with *Attach log* the end of the game's log. **Open on 
 4. **Build**: Clang compiles everything into an `.exe`, on the player's own PC.
 5. **Run-time patches**: the game's menus and data are extended as the game loads them. Your game files on disk stay untouched.
 
-KarPur builds on the MIT-licensed [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) and [LAS Recomp](https://github.com/peiikai/LASRecomp). Code taken from other projects is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+PokiNative builds KarPur and on the MIT-licensed [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) and [LAS Recomp](https://github.com/peiikai/LASRecomp). Code taken from other projects is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Built with AI
 
