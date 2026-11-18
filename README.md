@@ -175,7 +175,7 @@ in the data your own copy of the game already contains; KarPur adds none.
 
 ## Getting started
 
-1. **Download** `KarPur-Launcher.exe` for Windows or `KarPur-Linux-Launcher-0.4.1.AppImage` for Linux from the [releases page](https://github.com/Grunttanamo/KarPur/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
+1. **Download** `KarPur-Launcher.exe` for Windows or `KarPur-Linux-Launcher-0.4.1.AppImage` for Linux from the [releases page](https://github.com/privacymatters42069-del/PokiNative/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
 2. **Choose your files** in the *Setup* tab:
    - the base game (`.xci`, or an eShop `.nsp` together with a *Firmware folder*)
    - the update and DLC (`.nsp`)
@@ -266,7 +266,7 @@ You add a few words, and with *Attach log* the end of the game's log. **Open on 
 4. **Build**: Clang compiles everything into an `.exe`, on the player's own PC.
 5. **Run-time patches**: the game's menus and data are extended as the game loads them. Your game files on disk stay untouched.
 
-PokiNative builds KarPur and on the MIT-licensed [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) and [LAS Recomp](https://github.com/peiikai/LASRecomp). Code taken from other projects is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+PokiNative builds KarPur (https://github.com/Grunttanamo/KarPur) and on the MIT-licensed [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) and [LAS Recomp](https://github.com/peiikai/LASRecomp). Code taken from other projects is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Built with AI
 
