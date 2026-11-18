@@ -89,8 +89,9 @@ The information below documents the last release and remains available for refer
 > **If the game crashes, try the two independent Compatibility switches in Settings.** The original mode changes GPU submission timing; **Keep hot memory active** sets `hot_cool = 0` and can be turned off again. On supported desktop PCs, enabling Resizable BAR may also improve performance; see the [launcher guide](docs/launcher.md#die-tabs) for the general UEFI/BIOS steps. Results vary by system.
 
 > [!IMPORTANT]
-> **AMD GPU owners and Vulkan people wanted.** The remaining AMD-specific bugs (a crash on some RDNA 3 cards during
-> character creation, flickering trees in compatibility mode) are hard to track down: the maintainer has no AMD card
+> **AMD GPU owners and Vulkan people wanted.** AMD RDNA 3 GPUs now enable the extra transform-feedback
+> barriers by default during character creation as an unconfirmed mitigation; set `TOTK_XFB_SYNC=0` to opt out. Flickering trees in compatibility
+> mode is also AMD-specific and hard to track down: the maintainer has no AMD card
 > and knows nobody who does. If you own one and know Vulkan or graphics debugging, your help would make a real
 > difference — testing, logs, a pull request, or even just pointing out what to look at. Contributions put together
 > with the help of an AI assistant are very welcome too. Please open an issue or pull request; see
