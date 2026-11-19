@@ -9,15 +9,76 @@
 
 **Quick start:** Use your own XCI, the 4.0.0 update, and `prod.keys`; build with KarPur's launcher or RecompLauncher. RecompLauncher accepts XCI base games only because it cannot request the firmware folder needed by an NSP base game.
 
-[Download the launcher]([https://github.com/privacymatters42069-del/PokiNative/releases/]) · [0.4.1 release notes](docs/releases/0.4.1.md) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
+[Download the launcher](https://github.com/Grunttanamo/KarPur/releases) · [0.4.2 release notes](docs/releases/0.4.2.md) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
 
-<a href="https://recomplauncher.com/game/Pokinative"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a> [![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/privacymatters42069-del)
-
-Please respect Grunttanamo and their decision to step away from the project, report all issues and complaints here
-
-thank you
+<a href="https://recomplauncher.com/game/karpur"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a> [![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/grunttanamo)
 
 </div>
+
+# KarPur – Project Discontinuation
+
+> [!CAUTION]
+> **KarPur development is officially discontinued.** The repository remains available for anyone who wants to continue the project under its license.
+
+After giving it a lot of thought, I've decided to discontinue development of **KarPur**, my Pokémon Scarlet/Violet recomp project.
+
+This decision wasn't made overnight, but honestly, I've reached a point where I simply don't want to continue anymore.
+
+There are several reasons behind this decision:
+
+- **Constant insults and disrespect.** Too many people seem to think it's acceptable to insult and disrespect the person working on this project.
+- **Unreasonable demands.** People constantly DEMAND certain features and expect them to be implemented immediately, as if I'm obligated to fulfill every request on their schedule.
+- **A lack of support.** While many people are quick to complain or demand things, very few actually offer help or contribute anything meaningful.
+- **No willingness to read.** Apparently, even taking a few minutes to read the README, check existing issues, or simply look at the information provided directly in the launcher is too much to ask for some people.
+- **A complete lack of appreciation.** Everything provided through KarPur is free. Instead of appreciating the work, time, and effort that goes into maintaining this project, some people choose to criticize, insult, and put down the person behind it.
+
+And I think it's important to make one thing clear: **People seem to have absolutely no idea how much work goes into this project.**
+
+I spend up to 10 hours a day working on KarPur. I'm constantly looking for ways to fix existing issues, implement new features, improve things, and make the overall experience better. I run countless tests, troubleshoot problems, and spend an incredible amount of my own time trying to make everything work as intended.
+
+On top of that, I'm even investing my own private money into this project. I don't charge anyone for using KarPur. I don't ask for anything in return. I'm simply doing this because I wanted to create something that other people could enjoy.
+
+The one thing I would have appreciated in return is a little understanding and willingness to help.
+
+Take the AMD-related issues, for example. I don't own an AMD GPU, which makes it extremely difficult for me to reproduce, investigate, and fix problems specific to AMD hardware. I've never expected people to magically solve these issues for me. All I wanted was some cooperation from people who actually have AMD GPUs and could help with testing and troubleshooting.
+
+Instead, I often find myself being blamed for problems I simply cannot properly investigate without the necessary hardware or assistance.
+
+I'm doing this in my free time, investing my own time, effort, and money into something that I wanted other people to enjoy. I'm not getting paid for this, and I certainly don't owe anyone anything.
+
+Yet, somehow, providing something for free has led to people treating me as if I'm their personal developer, support team, and feature-request machine.
+
+And honestly? **I'm tired of it.**
+
+I started KarPur because I enjoyed working on it and wanted to share something with the community. That enjoyment has gradually been replaced by frustration, stress, and disappointment.
+
+I have no intention of continuing to put my time and energy into a project where so many people seem to take everything for granted while showing little to no respect for the person behind it.
+
+To everyone who genuinely supported the project, appreciated my work, provided constructive feedback, helped with testing, or simply enjoyed using KarPur: **Thank you.** You are not the reason for this decision, and I genuinely appreciate every single one of you.
+
+## What happens next?
+
+The GitHub repository will remain available, and anyone is free to fork the project, modify it, maintain it, or continue development in whatever direction they want, as long as they respect the project's license.
+
+If you believe KarPur needs certain features, improvements, or fixes so badly, then you're more than welcome to take matters into your own hands.
+
+**It's your turn now.**
+
+You have the source code, you have the opportunity, and you're free to take the project further. Maintain it, improve it, fix things, or build something entirely different from it. That's entirely up to you.
+
+I'm handing over the responsibility to whoever wants to take it. There is nothing stopping anyone from continuing where I left off.
+
+But I am done.
+
+I'm no longer going to spend countless hours of my life, my own money, and my energy on something that has become such a frustrating experience.
+
+I don't want to do this anymore. And I won't.
+
+**KarPur development is officially discontinued.**
+
+Thank you to everyone who made the journey worthwhile.
+
+---
 
 The information below documents the last release and remains available for reference. No further development is planned by the original maintainer.
 
@@ -30,7 +91,7 @@ The information below documents the last release and remains available for refer
 > **If the game crashes, try the two independent Compatibility switches in Settings.** The original mode changes GPU submission timing; **Keep hot memory active** sets `hot_cool = 0` and can be turned off again. On supported desktop PCs, enabling Resizable BAR may also improve performance; see the [launcher guide](docs/launcher.md#die-tabs) for the general UEFI/BIOS steps. Results vary by system.
 
 > [!IMPORTANT]
-> **AMD GPU owners and Vulkan people wanted.** In the 0.4.1 candidate, AMD RDNA 3 GPUs enable the extra transform-feedback
+> **AMD GPU owners and Vulkan people wanted.** In the 0.4.2 candidate, AMD RDNA 3 GPUs enable the extra transform-feedback
 > barriers by default during character creation as an unconfirmed mitigation; set `TOTK_XFB_SYNC=0` to opt out. Flickering trees in compatibility
 > mode is also AMD-specific and hard to track down: the maintainer has no AMD card
 > and knows nobody who does. If you own one and know Vulkan or graphics debugging, your help would make a real
@@ -38,9 +99,9 @@ The information below documents the last release and remains available for refer
 > with the help of an AI assistant are very welcome too. Please open an issue or pull request; see
 > [Troubleshooting](#troubleshooting) and the open issues for what is known so far.
 
-## What is PokiNative?
+## What is KarPur?
 
-PokiNative is a fork of KarPur a fan project. It takes the ARM64 code of *Pokémon Scarlet & Violet* (Nintendo Switch, 2022) and translates it into C code, which it compiles into a native Windows or Linux program. The Switch system and its graphics API are replaced by a runtime of our own, and the game draws its pictures through Vulkan.
+KarPur is a fan project. It takes the ARM64 code of *Pokémon Scarlet & Violet* (Nintendo Switch, 2022) and translates it into C code, which it compiles into a native Windows or Linux program. The Switch system and its graphics API are replaced by a runtime of our own, and the game draws its pictures through Vulkan.
 
 In practice that means:
 - a steady **60 FPS**
@@ -175,7 +236,7 @@ in the data your own copy of the game already contains; KarPur adds none.
 
 ## Getting started
 
-1. **Download** `KarPur-Launcher.exe` for Windows or `KarPur-Linux-Launcher-0.4.1.AppImage` for Linux from the [releases page](https://github.com/privacymatters42069-del/PokiNative/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
+1. **Download** `KarPur-Launcher.exe` for Windows or `KarPur-Linux-Launcher-0.4.2.AppImage` for Linux from the [releases page](https://github.com/Grunttanamo/KarPur/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
 2. **Choose your files** in the *Setup* tab:
    - the base game (`.xci`, or an eShop `.nsp` together with a *Firmware folder*)
    - the update and DLC (`.nsp`)
@@ -192,7 +253,7 @@ Your dumps, your keys and the built game stay on your PC. A guide in German is i
 
 ### Use RecompLauncher
 
-Install PokiNative/KarPur from its page in RecompLauncher, then provide your own `.xci`, the 4.0.0 update, and `prod.keys` from your console; DLC is optional. RecompLauncher runs the normal build in the background and starts the game when it finishes. Its setup supports XCI base games only because RecompLauncher cannot request the firmware folder needed by an NSP base game. Use the apps own Setup tab for NSP.
+Install KarPur from its page in RecompLauncher, then provide your own `.xci`, the 4.0.0 update, and `prod.keys` from your console; DLC is optional. RecompLauncher runs KarPur's normal build in the background and starts the game when it finishes. Its setup supports XCI base games only because RecompLauncher cannot request the firmware folder needed by an NSP base game. Use KarPur's own Setup tab for NSP.
 
 > [!IMPORTANT]
 > **For a new game, keep Render scale at 1920×1080 until character creation is complete.** The character preview and ID photo can be misplaced or missing at other internal resolutions. After finishing character creation, change Render scale to your preferred size and restart the game. This is a temporary workaround while the capture and layout are fixed.
@@ -237,16 +298,16 @@ Exit code `3221225501` means that the processor lacks an instruction set the bui
 <details>
 <summary><b>The game crashes or freezes somewhere else</b></summary>
 
-Use the launcher's **Feedback** tab with **Attach log**, or open an [issue]([https://github.com/privacymatters42069-del/PokiNative/issues]) and attach the whole `build\game\logs\karpur.log` from your target folder. Please send the whole file: the last lines alone rarely show the cause. Name your graphics card and its driver version too.
+Use the launcher's **Feedback** tab with **Attach log**, or open an [issue](https://github.com/Grunttanamo/KarPur/issues) and attach the whole `build\game\logs\karpur.log` from your target folder. Please send the whole file: the last lines alone rarely show the cause. Name your graphics card and its driver version too.
 </details>
 
 ## Feedback
 
-PokiNative is mostly tested on the maintainer's PC, so reports from other systems help a lot. The launcher's **Feedback** tab fills in:
+KarPur is mostly tested on the maintainer's PC, so reports from other systems help a lot. The launcher's **Feedback** tab fills in:
 - your launcher version, game, update and DLC
 - your GPU, CPU, RAM and Windows version
 
-You add a few words, and with *Attach log* the end of the game's log. **Open on GitHub** opens it as a filled-in [issue]([https://github.com/privacymatters42069-del/PokiNative/issues]). You need a free GitHub account for that, and reports are public. Without an account, *Copy report* copies the report for anywhere else.
+You add a few words, and with *Attach log* the end of the game's log. **Open on GitHub** opens it as a filled-in [issue](https://github.com/Grunttanamo/KarPur/issues). You need a free GitHub account for that, and reports are public. Without an account, *Copy report* copies the report for anywhere else.
 
 ## Known limits
 
@@ -266,7 +327,7 @@ You add a few words, and with *Attach log* the end of the game's log. **Open on 
 4. **Build**: Clang compiles everything into an `.exe`, on the player's own PC.
 5. **Run-time patches**: the game's menus and data are extended as the game loads them. Your game files on disk stay untouched.
 
-PokiNative builds KarPur (https://github.com/Grunttanamo/KarPur) and on the MIT-licensed [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) and [LAS Recomp](https://github.com/peiikai/LASRecomp). Code taken from other projects is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+KarPur builds on the MIT-licensed [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) and [LAS Recomp](https://github.com/peiikai/LASRecomp). Code taken from other projects is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Built with AI
 
