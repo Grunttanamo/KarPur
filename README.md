@@ -36,9 +36,9 @@ The information below documents the last release and remains available for refer
 > with the help of an AI assistant are very welcome too. Please open an issue or pull request; see
 > [Troubleshooting](#troubleshooting) and the open issues for what is known so far.
 
-## What is KarPur?
+## What is PokiNative?
 
-KarPur is a fan project. It takes the ARM64 code of *Pokémon Scarlet & Violet* (Nintendo Switch, 2022) and translates it into C code, which it compiles into a native Windows or Linux program. The Switch system and its graphics API are replaced by a runtime of our own, and the game draws its pictures through Vulkan.
+PokiNative is a fork of KarPur a fan project. It takes the ARM64 code of *Pokémon Scarlet & Violet* (Nintendo Switch, 2022) and translates it into C code, which it compiles into a native Windows or Linux program. The Switch system and its graphics API are replaced by a runtime of our own, and the game draws its pictures through Vulkan.
 
 In practice that means:
 - a steady **60 FPS**
