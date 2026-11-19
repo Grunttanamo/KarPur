@@ -7,11 +7,11 @@
 
 *Native Windows and experimental Linux x86-64 builds with a Vulkan renderer, built on your own PC from your own copy of the game. Not an emulator.*
 
-**Quick start:** Use your own XCI, the 4.0.0 update, and `prod.keys`; build with KarPur's launcher or RecompLauncher. RecompLauncher accepts XCI base games only because it cannot request the firmware folder needed by an NSP base game.
+**Quick start:** Use your own XCI, the 4.0.0 update, and `prod.keys`; build with PokiNative's launcher or RecompLauncher. RecompLauncher accepts XCI base games only because it cannot request the firmware folder needed by an NSP base game.
 
-[Download the launcher](https://github.com/Grunttanamo/KarPur/releases) · [0.4.2 release notes](docs/releases/0.4.2.md) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
+[Download the launcher](https://github.com/privacymatters42069-del/PokiNative/releases) · [0.4.2 release notes](docs/releases/0.4.2.md) · [Requirements](#requirements) · [Getting started](#getting-started) · [Troubleshooting](#troubleshooting) · [Roadmap](docs/roadmap.md)
 
-<a href="https://recomplauncher.com/game/karpur"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a> [![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recompstore.com/dev/grunttanamo)
+<a href="[https://recomplauncher.com/game/pokinative]"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a> [![Verified developer on RecompStore](https://recompstore.com/assets/press/verified-dark.svg)](https://recomplauncher.com/dev/privacymatters42069-del)
 
 </div>
 
@@ -173,7 +173,7 @@ in the data your own copy of the game already contains; KarPur adds none.
 
 ## Getting started
 
-1. **Download** `KarPur-Launcher.exe` for Windows or `KarPur-Linux-Launcher-0.4.2.AppImage` for Linux from the [releases page](https://github.com/Grunttanamo/KarPur/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
+1. **Download** `PokiNative-Launcher.exe` for Windows or `PokeNative-Linux-Launcher-0.4.2.AppImage` for Linux from the [releases page](https://github.com/privacymatters42069-del/PokiNative/releases). Windows may warn that the file is unknown, because it is not signed: choose *More info* → *Run anyway*. Linux instructions are in the [AppImage guide](docs/launcher-linux.md).
 2. **Choose your files** in the *Setup* tab:
    - the base game (`.xci`, or an eShop `.nsp` together with a *Firmware folder*)
    - the update and DLC (`.nsp`)
@@ -208,11 +208,11 @@ Your base game is an `.nsp`, or an `.xci` converted from one. The game's system 
 
 In the launcher, open **Settings** and turn on **Compatibility mode**, then **Save settings**. This sends the game's graphics work to the GPU at once, instead of slightly delayed. Far trees may flicker a little more, and the frame rate can drop a little.
 
-Without the launcher, start the game from PowerShell in the folder of `karpur.exe` like this:
+Without the launcher, start the game from PowerShell in the folder of `pokinative.exe` like this:
 
 ```powershell
 $env:TOTK_SUBMIT_DEFER = "0"
-.\karpur.exe
+.\pokinative.exe
 ```
 
 Please also send us a report (see below), so we can find the cause.
@@ -221,7 +221,7 @@ Please also send us a report (see below), so we can find the cause.
 <details>
 <summary><b>The build stops at the linking step with "Permission denied"</b></summary>
 
-The game is still running from that folder and holds `karpur.exe` open, so the new one cannot be written (#48).
+The game is still running from that folder and holds `pokinative.exe` open, so the new one cannot be written (#48).
 Close the game and press **Repair** or **Update** again. The message names the cause in its last line, but it
 arrives as a compiler error, which hides it.
 </details>
@@ -235,16 +235,16 @@ Exit code `3221225501` means that the processor lacks an instruction set the bui
 <details>
 <summary><b>The game crashes or freezes somewhere else</b></summary>
 
-Use the launcher's **Feedback** tab with **Attach log**, or open an [issue](https://github.com/Grunttanamo/KarPur/issues) and attach the whole `build\game\logs\karpur.log` from your target folder. Please send the whole file: the last lines alone rarely show the cause. Name your graphics card and its driver version too.
+Use the launcher's **Feedback** tab with **Attach log**, or open an [issue](https://github.com/privacymatters42069-del/PokiNative/issues) and attach the whole `build\game\logs\karpur.log` from your target folder. Please send the whole file: the last lines alone rarely show the cause. Name your graphics card and its driver version too.
 </details>
 
 ## Feedback
 
-KarPur is mostly tested on the maintainer's PC, so reports from other systems help a lot. The launcher's **Feedback** tab fills in:
+PokiNative is mostly tested on the maintainer's PC, so reports from other systems help a lot. The launcher's **Feedback** tab fills in:
 - your launcher version, game, update and DLC
 - your GPU, CPU, RAM and Windows version
 
-You add a few words, and with *Attach log* the end of the game's log. **Open on GitHub** opens it as a filled-in [issue](https://github.com/Grunttanamo/KarPur/issues). You need a free GitHub account for that, and reports are public. Without an account, *Copy report* copies the report for anywhere else.
+You add a few words, and with *Attach log* the end of the game's log. **Open on GitHub** opens it as a filled-in [issue](https://github.com/privacymatters42069-del/PokiNative/issues). You need a free GitHub account for that, and reports are public. Without an account, *Copy report* copies the report for anywhere else.
 
 ## Known limits
 
