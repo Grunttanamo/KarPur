@@ -1,9 +1,9 @@
 {
   "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
   "format": 1,
-  "name": "KarPur",
-  "repo": "Grunttanamo/KarPur",
-  "min": "0.90.0-beta.51",
+  "name": "PokiNative",
+  "repo": "privacymatters42069-del/PokiNative",
+  "min": "0.4.2",
   "inputs": [
     {
       "id": "game",
@@ -32,18 +32,18 @@
     }
   ],
   "start": {
-    "program": ["KarPur-Launcher.exe", "KarPur-Linux-Launcher.AppImage", "KarPur-Launcher-Linux"],
+    "program": ["PokiNative-Launcher.exe", "PokiNative-Linux-Launcher.AppImage", "PokiNative-Launcher-Linux"],
     "args": ["--play", "--target", "{install}"]
   },
   "prepare": {
-    "program": ["KarPur-Launcher.exe", "KarPur-Linux-Launcher.AppImage", "KarPur-Launcher-Linux"],
+    "program": ["PokiNative-Launcher.exe", "PokiNative-Linux-Launcher.AppImage", "PokiNative-Launcher-Linux"],
     "args": [
       "--prepare", "--game", "{input:game}", "--update", "{input:update}",
       "--keys", "{input:keys}", "--dlc={input:dlc}", "--target", "{install}"
     ],
-    "label": "Build KarPur from your own game files",
+    "label": "Build PokiNative from your own game files",
     "timeout": 10800,
-    "done": ["{install}/.karpur-recomp-ready"]
+    "done": ["{install}/.pokinative-recomp-ready"]
   },
   "config": [
     {
@@ -51,8 +51,8 @@
       "format": "ini",
       "file": [
         {
-          "path": "{install}/KarPur/build/game/karpur.ini",
-          "if": "{install}/KarPur/build/game/karpur.exe"
+          "path": "{install}/PokiNative/build/game/karpur.ini",
+          "if": "{install}/PokiNative/build/game/karpur.exe"
         },
         { "path": "{install}/build/game/karpur.ini" }
       ],
@@ -66,16 +66,16 @@
     }
   ],
   "saves": [
-    "{install}/KarPur/build/profile/save",
+    "{install}/PokiNative/build/profile/save",
     "{install}/build/profile/save"
   ],
   "folders": {
     "logs": [
       {
-        "path": "{install}/KarPur/launcher.log",
-        "if": "{install}/KarPur/build/game/karpur.exe"
+        "path": "{install}/PokiNative/launcher.log",
+        "if": "{install}/PokiNative/build/game/karpur.exe"
       },
-      { "path": "{install}/KarPur/build/game/logs", "if": "{install}/KarPur/build/game/karpur.exe" },
+      { "path": "{install}/PokiNative/build/game/logs", "if": "{install}/KarPur/build/game/karpur.exe" },
       { "path": "{install}/build/game/logs" },
       { "path": "{install}/launcher-linux.log" }
     ]
@@ -143,7 +143,7 @@
     {
       "id": "logs",
       "label": "Logs",
-      "help": "Open KarPur's game and setup logs.",
+      "help": "Open PokiNative's game and setup logs.",
       "open": "logs"
     }
   ]
