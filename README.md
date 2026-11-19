@@ -47,7 +47,7 @@ In practice that means:
 - **keyboard and mouse**
 - **more wild Pokémon**
 
-The **KarPur Launcher** does all the building for you.
+The **PokiNative Launcher** does all the building for you.
 
 ## Requirements
 
@@ -80,7 +80,7 @@ You also need **`prod.keys`** from the same console.
 
 | | Platform | Status |
 |---|---|---|
-| 🟢 | Windows 10 / 11 | Tested (Ryzen 7 9800X3D, RTX 5080) |
+| 🟢 | Windows 10 / 11 | Tested (Ryzen 7 7800X3D, RTX 3080,5600X3D, 9070XT) |
 | 🧪 | Linux, Steam Deck | Experimental native AppImage launcher that builds the game locally. Scenery, text entry and performance still need wider Linux testing; Linux/Vulkan reports and pull requests are welcome. See [Linux launcher guide](docs/launcher-linux.md) |
 
 ## Status
@@ -110,7 +110,7 @@ Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](doc
 - **NVIDIA DLSS**: the 3D world is rendered at your window's size, or at 4K and then scaled down.
 - **DLSS Frame Generation**: 2× on RTX 40, up to 4× on RTX 50 cards. It needs Windows' hardware-accelerated GPU scheduling.
 - NVIDIA's files are not bundled. The launcher can download `nvngx_dlss.dll` from NVIDIA on request, or you can provide your own copy. Frame Generation needs the separate supported Streamline files.
-- **AMD FSR 2**: temporal anti-aliasing or window-sized upscaling on Vulkan, included with KarPur. Moving characters and effects can leave trails until their own motion is tracked.
+- **AMD FSR 2**: temporal anti-aliasing or window-sized upscaling on Vulkan, included with PokiNative. Moving characters and effects can leave trails until their own motion is tracked.
 - **Render scale**: internal image sizes from 800×450 to 3840×2160, independent of the window size. Wide, tall and portrait formats are experimental; their UI, visibility and character framing still need work. Fullscreen uses the monitor size.
 - **Ambient occlusion** and **Indirect light**: separate Off/Low/Medium/High settings for contact shading and screen-space colour bounce.
 - **AMD FSR 1** or bilinear scaling, with sharpness, when DLSS is off. The console's own **Handheld mode** (1280×720,
@@ -134,7 +134,7 @@ Details: [docs/roadmap.md](docs/roadmap.md) · daily log: [docs/progress.md](doc
 | Enhanced | 80 | playing |
 | Extreme | 120 | screenshots; can drop to about 35 FPS |
 
-Switch 2 uses the spawn values of the fan mod [Pokémon Compass](https://compass.seri.studio) by Aria Seri and Kas Seri. The higher levels only raise the count. KarPur contains these numbers, none of the mod's files.
+Switch 2 uses the spawn values of the fan mod [Pokémon Compass](https://compass.seri.studio) by Aria Seri and Kas Seri. The higher levels only raise the count. PokiNative contains these numbers, none of the mod's files.
 
 **People detail** and **Pokémon detail** can keep models at full detail farther away, up to 80 m. **Town people shown** offers the game's 12 or 24, 36 and 48 at once. Higher choices can increase memory pressure, so lower them if buildings or characters disappear.
 
@@ -144,7 +144,7 @@ Pokémon and Tauros' two breeds. Your own edition's Pokémon are unaffected.
 
 **No trade evolutions** (off by default): the 28 evolutions that can only happen through a trade work without one.
 16 of them on reaching a level, 12 by holding the item they needed and gaining a level. Both settings change values
-in the data your own copy of the game already contains; KarPur adds none.
+in the data your own copy of the game already contains; PokiNative adds none.
 
 ### 🕹️ Controls
 - **Mouse and keyboard or controller**; the mouse turns the camera.
@@ -160,7 +160,7 @@ in the data your own copy of the game already contains; KarPur adds none.
 - **The launcher itself works with a controller** too (#30): the sidebar's tabs and Play follow the stick or D-pad, A
   opens a page or presses a button, B goes back.
 
-### 🧰 The KarPur Launcher
+### 🧰 The PokiNative Launcher
 - **One file**: no installation and no administrator rights.
 - **Home**: a start page in your edition's colours, with Play, the state of your build, your last save and **your current team** (name and level, read when the game saves) at a glance.
 - **Setup**: builds the game from your dumps, shaders included. A stopped build goes on where it stopped.
@@ -184,13 +184,13 @@ in the data your own copy of the game already contains; KarPur adds none.
    - it translates the game's code
    - it compiles `karpur.exe`
    - finally, it prepares all shaders
-4. **Play**: press *Play*, or use the shortcut **Pokémon Violet (KarPur)** that the launcher puts into your target folder.
+4. **Play**: press *Play*, or use the shortcut **Pokémon Violet (PokiNative)** that the launcher puts into your target folder.
 
 Your dumps, your keys and the built game stay on your PC. A guide in German is in [docs/launcher.md](docs/launcher.md). If you want to do everything by hand, see [docs/setup-windows.en.md](docs/setup-windows.en.md) ([Deutsch](docs/setup-windows.md)).
 
 ### Use RecompLauncher
 
-Install KarPur from its page in RecompLauncher, then provide your own `.xci`, the 4.0.0 update, and `prod.keys` from your console; DLC is optional. RecompLauncher runs KarPur's normal build in the background and starts the game when it finishes. Its setup supports XCI base games only because RecompLauncher cannot request the firmware folder needed by an NSP base game. Use KarPur's own Setup tab for NSP.
+Install PokiNative from its page in RecompLauncher, then provide your own `.xci`, the 4.0.0 update, and `prod.keys` from your console; DLC is optional. RecompLauncher runs PokiNative's normal build in the background and starts the game when it finishes. Its setup supports XCI base games only because RecompLauncher cannot request the firmware folder needed by an NSP base game. Use PokiNative's own Setup tab for NSP.
 
 > [!IMPORTANT]
 > **For a new game, keep Render scale at 1920×1080 until character creation is complete.** The character preview and ID photo can be misplaced or missing at other internal resolutions. After finishing character creation, change Render scale to your preferred size and restart the game. This is a temporary workaround while the capture and layout are fixed.
@@ -264,7 +264,7 @@ You add a few words, and with *Attach log* the end of the game's log. **Open on 
 4. **Build**: Clang compiles everything into an `.exe`, on the player's own PC.
 5. **Run-time patches**: the game's menus and data are extended as the game loads them. Your game files on disk stay untouched.
 
-KarPur builds on the MIT-licensed [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) and [LAS Recomp](https://github.com/peiikai/LASRecomp). Code taken from other projects is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+PokiNative builds on the MIT-licensed [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) and [LAS Recomp](https://github.com/peiikai/LASRecomp). Code taken from other projects is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Built with AI
 
@@ -290,4 +290,4 @@ python tools/check_content.py --staged
 
 The project's own code is under the [MIT License](LICENSE); third-party code keeps its own license. The license grants nothing for the game.
 
-KarPur is an independent, non-commercial fan project. It is not affiliated with or endorsed by Nintendo, The Pokémon Company, Game Freak or Creatures Inc. *Pokémon*, *Pokémon Scarlet*, *Pokémon Violet* and *Nintendo Switch* are trademarks of their respective owners.
+PokiNative and KarPur is an independent, non-commercial fan project. It is not affiliated with or endorsed by Nintendo, The Pokémon Company, Game Freak or Creatures Inc. *Pokémon*, *Pokémon Scarlet*, *Pokémon Violet* and *Nintendo Switch* are trademarks of their respective owners.
