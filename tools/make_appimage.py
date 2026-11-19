@@ -16,6 +16,7 @@ import sys
 import tarfile
 import urllib.request
 import zipfile
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / 'dist' / 'linux'
@@ -46,7 +47,7 @@ def fetch(url, digest, filename):
                 return target
     temp = target.with_suffix('.download')
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'KarPur-AppImage/0.4.0'}), timeout=90) as response, temp.open('wb') as f:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'KarPur-AppImage/0.4.2'}), timeout=90) as response, temp.open('wb') as f:
             shutil.copyfileobj(response, f)
         with temp.open('rb') as f:
             if hashlib.file_digest(f, 'sha256').hexdigest() != digest:
@@ -191,9 +192,16 @@ def prepare():
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--prepare-only', action='store_true')
+    p.add_argument('--out', type=Path, help='external output directory for the launcher test build')
+    p.add_argument('--skip-self-check', action='store_true', help='build packages without launching their self-checks')
     a = p.parse_args()
     if sys.platform != 'linux' or platform.machine() not in ('x86_64', 'amd64'):
         p.error('build the AppImage on Linux x86-64 (WSL2 is supported)')
+    global DIST
+    if a.out:
+        DIST = a.out.resolve()
+        if DIST.is_relative_to(ROOT.resolve()):
+            p.error('--out must be outside the source tree')
     python = prepare()
     if a.prepare_only:
         return
@@ -205,8 +213,15 @@ def main():
         shutil.rmtree(appdir)
     publish = appdir / 'usr' / 'lib' / 'karpur'
     publish.mkdir(parents=True, exist_ok=True)
-    run('dotnet', 'publish', ROOT / 'launcher-linux' / 'KarPurLauncher.Linux.csproj', '-r', 'linux-x64',
-        '-c', 'Release', '--self-contained', 'true', '-o', publish)
+    publish_args = ['dotnet', 'publish', ROOT / 'launcher-linux' / 'KarPurLauncher.Linux.csproj', '-r', 'linux-x64',
+                    '-c', 'Release', '--self-contained', 'true']
+    if a.out:
+        publish_args += ['--artifacts-path', DIST / '.build' / 'dotnet']
+    publish_args += ['-o', publish]
+    run(*publish_args)
+    manifest = ROOT / 'recomplauncher.json'
+    shutil.copy2(manifest, publish / 'recomplauncher.json')
+    shutil.copy2(manifest, appdir / 'recomplauncher.json')
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', publish / 'THIRD_PARTY_NOTICES.md')
     shutil.copy2(ROOT / 'LICENSE', publish / 'KarPur-LICENSE')
     avalonia_license = fetch('https://raw.githubusercontent.com/AvaloniaUI/Avalonia/11.3.23/licence.md',
@@ -227,10 +242,11 @@ def main():
             add_file(z, ROOT / name, name)
         add_file(z, ROOT / 'toolchain' / 'sdl-src' / 'SDL3-3.4.20' / 'LICENSE.txt', 'toolchain/linux/SDL3-LICENSE.txt')
     (publish / 'START-HERE.txt').write_text(
-        'KarPur Linux: run ./KarPur-Launcher-Linux from this fully extracted folder.\n'
+        'PokiNative for Linux: run ./KarPur-Launcher-Linux from this fully extracted folder.\n'
         'Keep payload.zip next to the executable; a single copied file is not enough.\n'
         'Alternatively, launch the separate .AppImage file directly.\n', encoding='utf-8')
-    run(publish / 'KarPur-Launcher-Linux', '--self-check', '--require-payload')
+    if not a.skip_self_check:
+        run(publish / 'KarPur-Launcher-Linux', '--self-check', '--require-payload')
     folder_archive = DIST / 'KarPur-Launcher-Linux-x86_64.tar.gz'
     with tarfile.open(folder_archive, 'w:gz') as tar:
         tar.add(publish, arcname='linux-x64')
@@ -239,7 +255,7 @@ def main():
     folder_archive.with_name(folder_archive.name + '.sha256').write_text(f'{folder_digest}  {folder_archive.name}\n', encoding='ascii')
     (appdir / 'AppRun').write_text('#!/bin/sh\nAPPDIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\nexport APPDIR\nexec "$APPDIR/usr/lib/karpur/KarPur-Launcher-Linux" "$@"\n', encoding='utf-8')
     (appdir / 'AppRun').chmod(0o755)
-    (appdir / 'karpur.desktop').write_text('[Desktop Entry]\nType=Application\nName=KarPur Linux Launcher\nComment=Play KarPur on Linux\nExec=AppRun\nIcon=karpur\nTerminal=false\nCategories=Game;\n', encoding='utf-8')
+    (appdir / 'karpur.desktop').write_text('[Desktop Entry]\nType=Application\nName=PokiNative Launcher\nComment=Play PokiNative on Linux\nExec=AppRun\nIcon=karpur\nTerminal=false\nCategories=Game;\n', encoding='utf-8')
     shutil.copy2(ROOT / 'launcher' / 'assets' / 'icon-neutral.png', appdir / 'karpur.png')
     shutil.copy2(appdir / 'karpur.png', appdir / '.DirIcon')
     runtime = fetch(RUNTIME_URL, RUNTIME_SHA, 'runtime-x86_64')
@@ -253,14 +269,28 @@ def main():
         shutil.copyfileobj(stub, f)
         shutil.copyfileobj(filesystem, f)
     image.chmod(0o755)
-    run(image, '--appimage-extract-and-run', '--self-check', '--require-payload')
+    if not a.skip_self_check:
+        run(image, '--appimage-extract-and-run', '--self-check', '--require-payload')
+    version = ET.parse(ROOT / 'launcher-linux' / 'KarPurLauncher.Linux.csproj').findtext('.//Version')
+    if not version:
+        raise RuntimeError('launcher-linux/KarPurLauncher.Linux.csproj has no <Version>')
+    release_image = DIST / f'KarPur-{version}-linux-x86_64.AppImage'
+    try:
+        release_image.unlink(missing_ok=True)
+        os.link(image, release_image)
+    except OSError:
+        shutil.copy2(image, release_image)
+    release_image.chmod(0o755)
     with image.open('rb') as f:
         digest = hashlib.file_digest(f, 'sha256').hexdigest()
     image.with_suffix('.AppImage.sha256').write_text(f'{digest}  {image.name}\n', encoding='ascii')
-    deck_image = DIST / 'KarPur-Linux-Launcher-0.4.0.AppImage'
+    deck_image = DIST / 'KarPur-Linux-Launcher-0.4.2.AppImage'
     shutil.copy2(image, deck_image)
     deck_image.with_suffix('.AppImage.sha256').write_text(f'{digest}  {deck_image.name}\n', encoding='ascii')
+    release_image.with_suffix('.AppImage.sha256').write_text(
+        f'{digest}  {release_image.name}\n', encoding='ascii')
     print(f'AppImage built: {image} ({image.stat().st_size / 2**20:.1f} MiB)')
+    print(f'RecompLauncher Linux release package: {release_image} ({release_image.stat().st_size / 2**20:.1f} MiB)')
     print(f'Steam Deck launcher: {deck_image} ({deck_image.stat().st_size / 2**20:.1f} MiB)')
     print(f'Complete Linux folder built: {folder_archive} ({folder_archive.stat().st_size / 2**20:.1f} MiB)')
     print(f'Payload contains {len(names)} source files and the Linux tool dependencies.')
