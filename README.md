@@ -1,6 +1,6 @@
 <div align="center">
 
-![PokiNative]<img width="542" alt="PokiNative" src="docs/images/pokinative-logo.png" /> 
+<img width="542" alt="PokiNative" src="docs/images/pokinative-logo.png" /> 
 
 
 **Pokémon Scarlet & Violet, recompiled into a native PC game.**
