@@ -1,5 +1,64 @@
 # Progress
 
+## Building branded 0.4.2 test launchers (2026-11-19)
+
+- Built the Windows launcher and `recomplauncher.json` in `C:\Users\Admin\Downloads\PokiNative-0.4.2-test\windows`; the launcher is 56.8 MiB.
+- Built Linux packages in `C:\Users\Admin\Downloads\PokiNative-0.4.2-test\linux`: generic, versioned and Steam Deck AppImages (239.9 MiB each) and a complete folder archive (238.4 MiB). The payload contains 765 source files and Linux dependencies; the desktop entry displays PokiNative.
+- Verified all four Linux package checksum sidecars. Used `--skip-self-check`; no launcher was started, and no game build or test was run.
+
+## Updating and building the 0.4.2 test launchers (2026-11-19)
+
+- Bumped Windows and Linux launcher metadata, the Linux internal build revision, AppImage asset name and user-agent, and the Linux self-check label to 0.4.2. Updated the README and Linux launcher guide; added draft upstream release notes in `docs/releases/0.4.2.md`. Kept 0.4.1 notes and earlier progress entries as historical records.
+- Added `--out` and `--skip-self-check` to `tools/make_appimage.py`, so Linux test package output and .NET intermediates can stay outside the source tree without launching the package checks.
+- Built the Windows launcher at `C:\Users\Admin\Downloads\KarPur-0.4.2-test\windows\KarPur-Launcher.exe` (56.8 MiB, file version 0.4.2.0) with `recomplauncher.json`.
+- Built Linux packages under `C:\Users\Admin\Downloads\KarPur-0.4.2-test\linux` in WSL Ubuntu 24.04: AppImages (239.9 MiB each) and a complete folder archive (238.4 MiB). Its payload contains 765 source files and Linux dependencies.
+- Verified the Windows version metadata, manifest identity and Steam Deck AppImage checksum. No launcher self-checks or game build/test were run.
+
+## Rebranding visible launcher and game-window names (2026-11-19)
+
+- Changed the Windows and Linux launchers' displayed branding, desktop/shortcut labels, and user-facing status messages to PokiNative; changed the Windows and SDL game-window titles to `PokiNative`.
+- Kept executable/AppImage filenames, install directories, settings and save locations, app IDs, update asset identifiers, and the upstream KarPur repository URLs unchanged for compatibility. Bumped the Linux internal pin revision to 0.4.2.1 so an updated launcher can replace the prior 0.4.2 copy at the same path.
+- No launcher/game build or tests were run for this branding change.
+
+## Building the 0.4.1 Windows test launcher (2026-11-19)
+
+- Added `tools/make_launcher.py --out <directory>` to place the test launcher, RecompLauncher manifest, payload, and .NET intermediates outside the source tree. Documented it in `docs/launcher.md`.
+- Built `KarPur-Launcher.exe` at `C:\Users\Admin\Downloads\KarPur-Launcher-0.4.1-test\KarPur-Launcher.exe` (56.8 MiB, file version 0.4.1.0) and copied the matching `recomplauncher.json` beside it. The payload contains 814 files (5.7 MiB).
+- Verified the executable's version metadata and the manifest's SHA-256 against the source. Did not launch or test the launcher or game.
+
+## Fixing the transform-feedback compile error (2026-11-19)
+
+- `runtime/vk_xfb.c` called `cfg_get("TOTK_XFB_SYNC")` without including `cfg.h`, the header that declares `cfg_get`. Added the missing include; the reported pointer-conversion diagnostic was a consequence of the missing declaration.
+- Per the maintainer's instruction, no game build or build test was run. The maintainer can rerun the same build command to confirm the compile fix; any requested test-build output should be outside the source tree.
+- Attempted the requested 0.4.1 game build with output directed outside the source tree to `C:\Users\Admin\Downloads\KarPur-0.4.1-test`. It stopped before compilation because `game/extracted/update/exefs/main` is missing (`run tools/extract.py first`); the external output folder was not created. `config.local.toml` and the generated layout are also absent, so extraction cannot proceed here. Do not send game files or keys. No binary was built or tested.
+
+## RecompLauncher support (2026-11-18)
+
+- Workflow preference from the maintainer: do not build KarPur or test a game build unless explicitly asked. When test builds are requested, place their outputs outside the source tree. The launcher packages built for this task remain under the ignored `dist/` folder.
+- Added the RecompLauncher manifest at the repository root with XCI setup, the 4.0.0 update, optional DLC, the player's shared `prod.keys`, INI settings, save and log locations, and Windows/Linux start and prepare commands. `--prepare` reuses each launcher's existing build path, reports progress, and writes `.karpur-recomp-ready`; `--play` starts the built game without opening the launcher UI. Default no-argument launcher startup is unchanged.
+- Set the manifest minimum to RecompLauncher 0.90.0-beta.51, the first version that recognizes the `prepare.done` marker and avoids rebuilding a game already set up by KarPur.
+- RecompLauncher cannot request the firmware folder required by an NSP base game, so the manifest offers XCI only. The launchers still accept NSP with firmware through their normal Setup pages. No `game.dumps` entries were added because verified size/CRC32 values were not available.
+- The Windows packaging script now creates `KarPur-0.4.1-Windows-x64.zip` with the launcher and manifest. The Linux AppImage script places the manifest at the AppImage root and beside the folder-package binary, and creates the versioned `KarPur-0.4.1-linux-x86_64.AppImage` release asset. `tools/make_launcher.py` also uses the existing `build/source-files.json` snapshot if Git metadata is unavailable.
+- Added the exact light/dark RecompLauncher badge and quick-start note to the README, and updated the launcher guides.
+- Validation: the manifest passes the official JSON schema; both launcher projects build with zero warnings/errors; the normal Windows launcher remained open during a four-second no-argument startup check; the packaged Windows CLI returns exit code 1 for invalid setup input. Linux synthetic self-checks passed 20 locally, 30 in the folder package, and 31 in the AppImage, including manifest presence at the AppImage root and game-content exclusion. Static `tools/check_launcher.py` checks pass. The Windows ZIP contains the launcher and a byte-identical manifest; the Linux release AppImage checksum matches its sidecar. No game files or keys were used.
+- Remaining verification: no end-to-end RecompLauncher setup or game launch was run because no player-owned game files were available. Steam Deck gameplay also remains untested. `tools/check_content.py` could not enumerate files because this workspace has no Git metadata; the Windows and Linux package checks found no game-content files. `tools/check_launcher.py --payload` passed its synthetic assertions but still exits nonzero when Windows cannot remove its temporary build directory (`WinError 32`).
+- No commit, release, or pull request was created.
+
+## 0.4.1 upstream pull request preparation (2026-11-18)
+
+- The user is preparing a pull request to the original KarPur repository for a possible 0.4.1 release. The original maintainer's discontinuation notice remains unchanged; release and issue links continue to point to the original repository.
+- The user confirms the RDNA 3 transform-feedback mitigation is not in the published 0.4.0 release and wants it included in 0.4.1. The working tree contains the runtime implementation in `runtime/vk_xfb.c` and RDNA 3 detection in `runtime/vk_caps.c`; the release notes now introduce it in 0.4.1.
+- Launcher version metadata and the Linux AppImage asset name are updated to 0.4.1. Draft release notes are in `docs/releases/0.4.1.md`. Build and self-check results will be recorded after validation.
+- `tools/check_content.py` and all six static checks in `tools/check_launcher.py` pass. The Windows launcher was rebuilt as `dist/KarPur-Launcher.exe` (56.8 MiB, file version 0.4.1.0), with `dist/recomplauncher.json` copied from the source. All nine synthetic payload assertions pass, but `tools/check_launcher.py --payload` exits nonzero because Python cannot remove its temporary build directory (`WinError 32`, directory in use); retrying with .NET build servers disabled had the same cleanup error.
+- Rebuilt the Linux AppImage and complete-folder archive under WSL2. Both packaged self-checks pass all 28 checks; the payload contains 765 source files and excludes game data and keys. SHA-256 sidecars were generated and verified against both artifacts.
+- These are packaging and synthetic-data checks, not a clean game installation or gameplay test on Windows, Linux or Steam Deck. No commit, tag, release or pull request was created.
+
+## 0.4.0 local test launcher build (2026-11-18)
+
+- Built the Windows test launcher at `dist/KarPur-Launcher.exe` (56.6 MiB) and copied the root `recomplauncher.json` to `dist/recomplauncher.json`. The copied manifest matches the source file. The Windows build includes the current repository payload and is for local testing, not a published release.
+- `tools/check_launcher.py --payload` passed all static checks and all nine synthetic payload-unpacking checks. The check confirms the packaged build behavior; it does not replace a real game installation or gameplay test.
+- Built `dist/linux/KarPur-Linux-Launcher-0.4.0.AppImage` (239.9 MiB) and the complete Linux folder archive in Ubuntu 24.04 under WSL2. Its packaged self-check passed all 28 checks; the AppImage also passed a separate self-check with `--appimage-extract-and-run --self-check --require-payload`. The payload contains 764 source files and Linux tool dependencies, and the check confirms it excludes game data and keys. This verifies packaging, not installation or gameplay on a Steam Deck. No game files were used or packaged.
+
 ## Project discontinuation (2026-11-18)
 
 - The maintainer announced in the README that KarPur development is discontinued. The repository remains available under its license for anyone who wants to fork or continue the project. Version 0.4.0 is the last release from the original maintainer; no further development is planned by them.
@@ -508,10 +567,10 @@
 - Reading `runtime/vk_xfb.c` with that in hand: the barrier after transform feedback is recorded **once per pass**,
   when the game ends capture, never between the captured draws inside the pass. That is the one place in this path
   with no ordering at all. `TOTK_XFB_SYNC=1` (`xfb_sync`, `vk_xfb_draw_end`) adds a full barrier after every
-  captured draw; off by default, slower when on.
-- Hypothesis, not a finding: nobody here has an AMD card to reproduce it on. Posted in #18 with what either
-  outcome means — no crash narrows the barrier down to the right stage/access pair, still crashing moves the
-  suspicion to the sizes and offsets handed to `vkCmdBindTransformFeedbackBuffersEXT`.
+  captured draw. AMD RDNA 3 devices now enable it by default as a mitigation (RX 7600/RDNA 3 and RX 7900/RDNA 3);
+  RDNA 4 and other GPUs keep the faster off-by-default behavior. `TOTK_XFB_SYNC=0` explicitly opts out.
+- Hypothesis, not a finding until reproduced: no crash narrows the barrier down to the missing draw-to-draw ordering;
+  still crashing moves the suspicion to the sizes and offsets handed to `vkCmdBindTransformFeedbackBuffersEXT`.
 
 ## Launcher: two builds that could not recover, and a report that named the wrong thing (2026-11-14)
 
