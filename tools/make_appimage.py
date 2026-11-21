@@ -47,7 +47,7 @@ def fetch(url, digest, filename):
                 return target
     temp = target.with_suffix('.download')
     try:
-        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'KarPur-AppImage/0.4.2'}), timeout=90) as response, temp.open('wb') as f:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'KarPur-AppImage/0.4.5'}), timeout=90) as response, temp.open('wb') as f:
             shutil.copyfileobj(response, f)
         with temp.open('rb') as f:
             if hashlib.file_digest(f, 'sha256').hexdigest() != digest:
@@ -219,9 +219,12 @@ def main():
         publish_args += ['--artifacts-path', DIST / '.build' / 'dotnet']
     publish_args += ['-o', publish]
     run(*publish_args)
-    manifest = ROOT / 'recomplauncher.json'
-    shutil.copy2(manifest, publish / 'recomplauncher.json')
-    shutil.copy2(manifest, appdir / 'recomplauncher.json')
+    manifest = json.loads((ROOT / 'recomplauncher.json').read_text(encoding='utf-8'))
+    # Save locations are actual folders, not fallbacks: the Linux launcher builds directly under {install}.
+    manifest['saves'] = ['{install}/build/profile/save']
+    manifest_text = json.dumps(manifest, ensure_ascii=False, indent=2) + '\n'
+    (publish / 'recomplauncher.json').write_text(manifest_text, encoding='utf-8')
+    (appdir / 'recomplauncher.json').write_text(manifest_text, encoding='utf-8')
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', publish / 'THIRD_PARTY_NOTICES.md')
     shutil.copy2(ROOT / 'LICENSE', publish / 'KarPur-LICENSE')
     avalonia_license = fetch('https://raw.githubusercontent.com/AvaloniaUI/Avalonia/11.3.23/licence.md',
@@ -247,7 +250,7 @@ def main():
         'Alternatively, launch the separate .AppImage file directly.\n', encoding='utf-8')
     if not a.skip_self_check:
         run(publish / 'KarPur-Launcher-Linux', '--self-check', '--require-payload')
-    folder_archive = DIST / 'KarPur-Launcher-Linux-x86_64.tar.gz'
+    folder_archive = DIST / 'PokiNative-Launcher-Linux-x86_64.tar.gz'
     with tarfile.open(folder_archive, 'w:gz') as tar:
         tar.add(publish, arcname='linux-x64')
     with folder_archive.open('rb') as f:
@@ -264,7 +267,7 @@ def main():
     shutil.copy2(license_file, publish / 'AppImage-runtime-LICENSE')
     squash = DIST / 'karpur.squashfs'
     run('mksquashfs', appdir, squash, '-noappend', '-all-root', '-comp', 'gzip', '-no-xattrs', '-quiet')
-    image = DIST / 'KarPur-Launcher-Linux-x86_64.AppImage'
+    image = DIST / 'PokiNative-Launcher-Linux-x86_64.AppImage'
     with image.open('wb') as f, runtime.open('rb') as stub, squash.open('rb') as filesystem:
         shutil.copyfileobj(stub, f)
         shutil.copyfileobj(filesystem, f)
@@ -274,7 +277,7 @@ def main():
     version = ET.parse(ROOT / 'launcher-linux' / 'KarPurLauncher.Linux.csproj').findtext('.//Version')
     if not version:
         raise RuntimeError('launcher-linux/KarPurLauncher.Linux.csproj has no <Version>')
-    release_image = DIST / f'KarPur-{version}-linux-x86_64.AppImage'
+    release_image = DIST / f'PokiNative-{version}-linux-x86_64.AppImage'
     try:
         release_image.unlink(missing_ok=True)
         os.link(image, release_image)
@@ -284,7 +287,7 @@ def main():
     with image.open('rb') as f:
         digest = hashlib.file_digest(f, 'sha256').hexdigest()
     image.with_suffix('.AppImage.sha256').write_text(f'{digest}  {image.name}\n', encoding='ascii')
-    deck_image = DIST / 'KarPur-Linux-Launcher-0.4.2.AppImage'
+    deck_image = DIST / f'PokiNative-Linux-Launcher-{version}.AppImage'
     shutil.copy2(image, deck_image)
     deck_image.with_suffix('.AppImage.sha256').write_text(f'{digest}  {deck_image.name}\n', encoding='ascii')
     release_image.with_suffix('.AppImage.sha256').write_text(

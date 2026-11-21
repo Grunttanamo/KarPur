@@ -10,8 +10,10 @@ never leave their PC. Needs the .NET 10 SDK.
 """
 
 import argparse
+import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -79,12 +81,20 @@ def main():
     manifest = output_dir / 'recomplauncher.json' if test_build else DIST / 'recomplauncher.json'
     manifest.write_bytes((ROOT / 'recomplauncher.json').read_bytes())
     print(f'{manifest}: RecompLauncher manifest')
+    windows_asset = target.with_name('KarPur-Launcher-Windows-x86_x64.exe')
+    shutil.copyfile(target, windows_asset)
+    with windows_asset.open('rb') as f:
+        digest = hashlib.file_digest(f, 'sha256').hexdigest()
+    checksum = windows_asset.with_name(windows_asset.name + '.sha256')
+    checksum.write_text(f'{digest}  {windows_asset.name}\n', encoding='ascii')
+    print(f'{windows_asset}: Windows x86-64 launcher')
+    print(f'{checksum}: SHA-256')
     if not test_build:
         project = (ROOT / 'launcher' / 'KarPurLauncher.csproj').read_text(encoding='utf-8')
         version = re.search(r'<Version>([^<]+)</Version>', project)
         if not version:
             sys.exit('launcher/KarPurLauncher.csproj has no <Version>')
-        release = DIST / f'KarPur-{version.group(1)}-Windows-x64.zip'
+        release = DIST / f'PokiNative-{version.group(1)}-Windows-x64.zip'
         with zipfile.ZipFile(release, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             archive.write(target, 'KarPur-Launcher.exe')
             archive.write(manifest, 'recomplauncher.json')

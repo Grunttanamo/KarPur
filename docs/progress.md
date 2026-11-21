@@ -1,5 +1,126 @@
 # Progress
 
+## Building 0.4.5 with platform-correct RecompLauncher save paths (2026-11-21)
+
+- RecompLauncher treats every manifest `saves` entry as an active location, not a fallback. Its UI makes developer-declared paths read-only, which explains why the Windows path could not be changed by the player.
+- Changed the Windows manifest to the reported sibling game folder, `{install}/../KarPur/build/profile/save`. The Linux package now generates its own manifest with only `{install}/build/profile/save`, preserving the working Steam Deck layout. Documented that the two platform layouts must not be listed together as fallback paths.
+- Built version 0.4.5 packages in `C:\Users\Admin\Downloads\PokiNative-0.4.5-cloud-save-fix`. Verified the Windows path resolves to `C:\Recomp Library\pokinative\KarPur\build\profile\save`; both Windows and Linux payloads still contain the AMD recorder-off fix.
+- `tools/check_launcher.py` passed. Linux folder and AppImage self-checks passed 33 and 34 checks respectively. Verified all manifest copies and SHA-256 sidecars. Windows launcher SHA-256: `b1b32a12c27bd56a9a256eecb0fcb18a6a88d74d38e1fba01d520e9e70f2bff5`; main Linux AppImage SHA-256: `c5de2670005c5f43201ec294127c486dc3b9f90085d8c231571ad112cc96a7d5`; Linux folder archive SHA-256: `b31f65aba52daf8b446793c3ffbaf7de9b307fdaa98bfda32260ef4b8cc1405a`.
+- No game playtest or cloud-sync round trip was run, and the packages were not uploaded to a public release. The Linux package restore used `NuGetAudit=false` for this invocation after the NuGet audit endpoint stalled.
+
+## Building the 0.4.5 AMD recorder-off test release (2026-11-21)
+
+- Built Windows and Linux test launchers in `C:\Users\Admin\Downloads\Pokinative-0.4.5-test-release`, with launcher version 0.4.5. The only runtime experiment is the recorder default off on AMD; `TOTK_SUBMIT_SYNC` remains off by default and XFB settings are unchanged.
+- Windows output is under `windows`; `tools/check_launcher.py` passed. Verified the launcher is version 0.4.5.0, the payload includes the AMD recorder change, the manifest matches, and the x86-64 launcher SHA-256 is `1e15930f7058ca127d05c4834e32be59936081de158be831aaedbed70158246a`.
+- Linux AppImage and complete-folder packages are under `linux`. The packaged self-check passed 33 checks for the folder package and 34 for the AppImage. Verified the AMD recorder change and manifest in the packages and all SHA-256 sidecars. Main AppImage SHA-256: `4b85e74478734c70a33465e90d43ce16ad5f4408a04dc9442a5599d9f3ae49dc`; folder archive SHA-256: `a81c54ec8703e3c764c11c479dd87c3274483258cb8ca53e98bd6bd26ed4d006`.
+- No game build, gameplay test, or antivirus vendor scan was run. Linux restore initially stalled on NuGet audit; the successful package build used `NuGetAudit=false` for that invocation.
+
+## First report on the AMD recorder-off test (2026-11-20)
+
+- One user reports that test 1 (AMD recorder thread off by default) fixed their crash. This is a single, unverified report; the GPU/driver, play duration, startup log confirmation, and rendering status have not yet been recorded.
+- Next: collect those details and seek repeat tests on other affected AMD GPUs before treating this as a confirmed fix.
+
+## Building the submit-sync AMD test launcher (2026-11-20)
+
+- Built a second Windows test launcher in `C:\Users\Admin\Downloads\PokiNative-0.4.5-amd-fix-test-2`. Its payload defaults `TOTK_SUBMIT_SYNC` to `1`; the recorder thread remains enabled by default on AMD, so this variant tests submission waits separately from the recorder-off test.
+- The packaged source payload contains 814 files and includes the PokiNative RecompLauncher manifest. Verified the manifest matches the repository copy and the launcher alias matches its SHA-256 sidecar (`c2376c2d1f326e472d1b78bf03a48930503a2788125d701fcf44585e14dfa35d`).
+- `tools/check_launcher.py` passed all checks. The launcher file version remains 0.4.4.0; the `0.4.5-amd-fix-test-2` folder name identifies this experiment only. No game build or AMD gameplay test was run.
+
+## Building an AMD recorder-off test launcher (2026-11-20)
+
+- For the AMD test, changed the Vulkan recorder default to off on AMD vendor devices while leaving it on by default for other GPUs. `TOTK_VK_RECORDER=1` remains an explicit opt-in; `TOTK_XFB_SYNC` behavior is unchanged. The AMD log now states when the recorder is off by default.
+- Built the Windows test launcher in `C:\Users\Admin\Downloads\PokiNative-0.4.5-amd-fix-test`. Its payload contains the changed `runtime/vk_rec.c`; the RecompLauncher manifest matches the source.
+- `tools/check_launcher.py` passed all checks. Verified the x86-64 launcher checksum (`7b28b5f68e14461936751f92fb78ba54a9bd045676da3aa47bcb16bfa928f2df`) and compatibility executable copy.
+- The folder is named for the 0.4.5 test, but the launcher file version remains 0.4.4.0; no project release version was changed. No game-specific runtime build or AMD gameplay test was run.
+
+## Always generating the Windows launcher checksum (2026-11-20)
+
+- Updated `tools/make_launcher.py` to copy the built launcher to `KarPur-Launcher-Windows-x86_x64.exe` and write its SHA-256 sidecar on every Windows build. The `KarPur-Launcher.exe` path required by RecompLauncher remains alongside it.
+- Rebuilt the 0.4.4 Windows test output. Verified the sidecar hash (`3e6c43f08296528386023e775329564578088da977cd6ec7c971b8698c33c4e9`), byte-identical compatibility executable, and packaged manifest hash.
+- Documented the additional output in `docs/launcher.md`. No launcher UI or game test was run.
+
+## Building matching 0.4.4 Windows and Linux test packages (2026-11-20)
+
+- Built the Linux AppImages and folder archive in `C:\Users\Admin\Downloads\PokiNative-0.4.4-recomplauncher-test\linux`, keeping the executable name `KarPur-Launcher-Linux` and the existing PokiNative package names.
+- Verified the Windows manifest, Linux AppDir-root manifest, and Linux launcher-directory manifest all match the updated source `recomplauncher.json`; the Windows test launcher is version 0.4.4.0.
+- Linux packaged self-check passed all 34 checks, including RecompLauncher manifest placement, the `--prepare` marker, and exclusion of game data and keys. All three AppImage checksums and the folder archive checksum match.
+- No launcher UI session, RecompLauncher setup, or game build/test was run.
+
+## Building a 0.4.4 Windows RecompLauncher test package (2026-11-20)
+
+- Built a fresh test launcher and manifest in `C:\Users\Admin\Downloads\PokiNative-0.4.4-recomplauncher-test\windows`: `KarPur-Launcher.exe` (56.8 MiB, file version 0.4.4.0) and `recomplauncher.json`.
+- Verified the packaged manifest SHA-256 matches the updated source manifest (`53AC23860518CB1323B9A074FAE637DADCCB69223C07900A021FC6CD78F1B888`).
+- The payload contains 814 files (5.7 MiB). The launcher was not started, and no RecompLauncher setup or game test was run.
+
+## Tailoring the RecompLauncher manifest for PokiNative (2026-11-20)
+
+- Updated the manifest's displayed name, repository, and player-facing input/setup/log labels for PokiNative instead of KarPur.
+- Kept the launch commands and internal install paths unchanged because PokiNative's Windows and Linux launchers still use those compatibility names and paths.
+- Parsed the manifest as JSON and verified its format, PokiNative identity, required setup inputs, and `--prepare` / `--play` arguments. No game files or keys were used; no end-to-end RecompLauncher setup was run.
+
+## Building 0.4.4 Windows and Linux test launchers (2026-11-19)
+
+- Bumped both launcher versions to 0.4.4 and the Linux pin revision to 0.4.4.0; updated the Linux AppImage user-agent and self-check label.
+- Built Windows output in `C:\Users\Admin\Downloads\build-0.4.4-test\windows`: `KarPur-Launcher.exe` (56.8 MiB, file version 0.4.4.0), `recomplauncher.json`, and a verified SHA-256 sidecar.
+- Built Linux output in `C:\Users\Admin\Downloads\build-0.4.4-test\linux`: three PokiNative-named AppImages (239.9 MiB each) and a complete folder archive (238.4 MiB). All four package SHA-256 sidecars match.
+- Linux packaged launcher self-check passed all 33 checks. No GitHub release/push, launcher UI session, or game build/test was run.
+
+## Use PokiNative names for future download packages (2026-11-19)
+
+- Per the maintainer's choice, future download archives and AppImages use the `PokiNative-` prefix; embedded launcher executable names and installed paths stay `KarPur` for compatibility.
+- Updated the Windows ZIP and Linux AppImage/folder-archive output names, and taught the Linux updater to recognize PokiNative assets while continuing to accept legacy KarPur AppImages.
+- Updated the Linux guide. Python package scripts compile; the Linux launcher builds with zero warnings/errors and its self-check passes 23 checks, including old/new asset-name recognition.
+- Existing 0.4.3 test packages were not renamed or rebuilt; these naming changes apply to future builds.
+
+## Pointing launcher updates to PokiNative releases (2026-11-19)
+
+- Changed both Windows and Linux update checks to `https://api.github.com/repos/privacymatters42069-del/PokiNative/releases/latest`. The Linux updater now parses the single-release response and treats HTTP 404 as no published release.
+- Rebuilt the 0.4.3 Windows and Linux launchers under `C:\Users\Admin\Downloads\PokiNative-0.4.3-test`. Verified the API URL in the Windows executable and Linux launcher DLL; Linux's packaged self-check passed all 30 checks and all four Linux package checksums match.
+- Added and verified `KarPur-Launcher-Windows-x86_x64.exe.sha256` beside the Windows executable.
+- No release was published, and no full launcher UI startup or game build/test was run.
+
+## Building 0.4.3 Windows and Linux test launchers (2026-11-19)
+
+- Bumped both launcher versions to 0.4.3, the Linux pin revision to 0.4.3.0, and the Linux AppImage user-agent and Steam Deck asset name. Updated the corresponding Linux self-check label.
+- Built Windows output in `C:\Users\Admin\Downloads\PokiNative-0.4.3-test\windows`: `KarPur-Launcher.exe` (56.8 MiB, file version 0.4.3.0) and `recomplauncher.json`. Confirmed the Home and Feedback issue URLs are embedded.
+- Built Linux output in `C:\Users\Admin\Downloads\PokiNative-0.4.3-test\linux`: generic and versioned AppImages, Steam Deck AppImage (239.9 MiB each), and complete folder archive (238.4 MiB). All four SHA-256 sidecars match.
+- Linux restore initially stalled while NuGet vulnerability data was unreachable; after packages restored, the build completed with `NuGetAudit=false`. The packaged Linux launcher self-check passed all 30 checks. No full launcher UI startup or game build/test was run.
+
+## Pointing Feedback submissions to PokiNative and rebuilding launcher (2026-11-19)
+
+- Updated the Feedback page's issue form URL to `https://github.com/privacymatters42069-del/PokiNative/issues/new`, matching the PokiNative repository used by the Home page issue link.
+- Rebuilt the Windows 0.4.2 launcher in `C:\Users\Admin\Downloads\PokiNative-0.4.2-test\windows`; verified version `0.4.2.0` and confirmed both the Home page issues URL and Feedback form URL are embedded.
+- Did not start the launcher or build/test the game.
+
+## Correcting the homepage issue link and rebuilding launcher (2026-11-19)
+
+- Changed the Home page's AMD known-issue link from the upstream KarPur issues page to `https://github.com/privacymatters42069-del/PokiNative/issues`. The separate Feedback page still uses its existing upstream issue-submission URL.
+- Rebuilt the Windows 0.4.2 launcher in `C:\Users\Admin\Downloads\PokiNative-0.4.2-test\windows`; verified version `0.4.2.0` and confirmed the PokiNative issues URL is embedded in the executable.
+- Did not start the launcher or build/test the game.
+
+## Rebuilding the 0.4.2 Windows test launcher (2026-11-19)
+
+- Built the Windows launcher and `recomplauncher.json` in `C:\Users\Admin\Downloads\PokiNative-0.4.2-test\windows`.
+- Verified the executable file and product versions are `0.4.2.0` and `0.4.2`; the launcher is 56.8 MiB.
+- Verified the packaged manifest SHA-256 matches the source manifest. Payload and .NET build intermediates are outside the source tree under `.build`.
+- No launcher startup or game build/test was run.
+
+## Copy validation before setup (2026-11-19)
+
+- Added explicit copy validation to `tools/extract.py`: setup now rejects base titles other than Pokémon Scarlet or Pokémon Violet and rejects an update whose title ID does not match the selected base.
+- Kept the existing 4.0.0 patch-site check as the version guard: `tools/fps_patches.py` rejects instruction mismatches and reports "another game version" instead of building from a bad copy.
+- Added synthetic unit assertions for supported Scarlet/Violet title IDs and wrong-base/wrong-update copies. No game files or keys were used.
+- `recomplauncher.json` still has no verified size/CRC32 dump entries because the repository does not contain source-verifiable Redump or No-Intro values for these cartridge/container dumps; the new title-ID checks do not invent known-good dump hashes.
+
+## RDNA 3 device loss with transform-feedback synchronization enabled (2026-11-19)
+
+- A reported AMD Radeon 780M (integrated RDNA 3) on AMD proprietary driver 26.11.2 (LLPC), Vulkan 1.4.359, still lost the device with `TOTK_XFB_SYNC=1` explicitly active. Transform feedback was active; graphics pipeline libraries were off.
+- The last GPU breadcrumb reached the start of part of submission 4895; `vkQueueSubmit2` for part 4897 then returned `VK_ERROR_DEVICE_LOST` (-4). The driver supplied no fault addresses or vendor data. The per-draw barrier mitigation alone did not prevent this 780M failure, but the breadcrumb does not identify the failing operation.
+- The process/system commit report was 4,964 / 16,410 of 29,759 MiB, not evidence of system commit exhaustion. The “released textures under VRAM pressure: dropped above 90%” line reports the configured budget threshold, not proof that it was crossed. A texture-view type mismatch bound a stand-in around frame 2,400 and needs correlation, not attribution.
+- The log also says there was no FPS patch table and the game was shipping 30 FPS whole-vsync steps despite a 60 FPS limit; confirm the patch table before treating this run as a 60 FPS test. The 256x256 view mismatch remains a separate rendering clue.
+- Read all 11 comments in [issue #18](https://github.com/Grunttanamo/KarPur/issues/18) through 2026-11-16. RX 7900 XTX reports confirm `TOTK_XFB=0` avoids the crash but corrupts skinned models; AMD Radeon Developer Panel Crash Analysis avoids it with models intact; and `TOTK_XFB_SYNC=1` still crashes. An RX 9070 XT (RDNA 4) completed character creation with defaults. The 780M's layout-2 buffers (0x510 bytes each) match a later RX 7900 report.
+- Next: instrument and validate the transform-feedback buffer offsets/ranges passed to `vkCmdBindTransformFeedbackBuffersEXT` during the heavy opening scene; do not repeat the already-failing barrier test. A one-run `TOTK_XFB=0` on the 780M could confirm the same path, with broken models expected. Keep the 256x256 view mismatch as a separate rendering clue.
+
 ## Building branded 0.4.2 test launchers (2026-11-19)
 
 - Built the Windows launcher and `recomplauncher.json` in `C:\Users\Admin\Downloads\PokiNative-0.4.2-test\windows`; the launcher is 56.8 MiB.

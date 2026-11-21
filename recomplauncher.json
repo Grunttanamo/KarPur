@@ -3,47 +3,47 @@
   "format": 1,
   "name": "PokiNative",
   "repo": "privacymatters42069-del/PokiNative",
-  "min": "0.4.2",
+  "min": "0.90.0-beta.51",
   "inputs": [
     {
       "id": "game",
-      "label": "Your own Pokémon Scarlet or Violet XCI cartridge dump",
+      "label": "Your own Pokémon Scarlet or Violet base game (.xci)",
       "role": "game",
       "formats": [{ "type": "file", "extensions": ["xci"], "requires": ["keys"] }]
     },
     {
       "id": "update",
-      "label": "Update 4.0.0 (.nsp)",
+      "label": "Pokémon Scarlet or Violet update 4.0.0 (.nsp)",
       "role": "update",
       "formats": [{ "type": "file", "extensions": ["nsp"], "requires": ["keys"] }]
     },
     {
       "id": "dlc",
-      "label": "Optional DLC (.nsp)",
+      "label": "Optional Pokémon Scarlet or Violet DLC (.nsp)",
       "role": "dlc",
       "optional": true,
       "formats": [{ "type": "file", "extensions": ["nsp"], "requires": ["keys"] }]
     },
     {
       "id": "keys",
-      "label": "prod.keys from your own console",
+      "label": "prod.keys from your own Nintendo Switch",
       "role": "key",
       "shared": "switch.prod-keys"
     }
   ],
   "start": {
-    "program": ["PokiNative-Launcher.exe", "PokiNative-Linux-Launcher.AppImage", "PokiNative-Launcher-Linux"],
+    "program": ["KarPur-Launcher.exe", "KarPur-Linux-Launcher.AppImage", "KarPur-Launcher-Linux"],
     "args": ["--play", "--target", "{install}"]
   },
   "prepare": {
-    "program": ["PokiNative-Launcher.exe", "PokiNative-Linux-Launcher.AppImage", "PokiNative-Launcher-Linux"],
+    "program": ["KarPur-Launcher.exe", "KarPur-Linux-Launcher.AppImage", "KarPur-Launcher-Linux"],
     "args": [
       "--prepare", "--game", "{input:game}", "--update", "{input:update}",
       "--keys", "{input:keys}", "--dlc={input:dlc}", "--target", "{install}"
     ],
     "label": "Build PokiNative from your own game files",
     "timeout": 10800,
-    "done": ["{install}/.pokinative-recomp-ready"]
+    "done": ["{install}/.karpur-recomp-ready"]
   },
   "config": [
     {
@@ -51,8 +51,8 @@
       "format": "ini",
       "file": [
         {
-          "path": "{install}/PokiNative/build/game/karpur.ini",
-          "if": "{install}/PokiNative/build/game/karpur.exe"
+          "path": "{install}/KarPur/build/game/karpur.ini",
+          "if": "{install}/KarPur/build/game/karpur.exe"
         },
         { "path": "{install}/build/game/karpur.ini" }
       ],
@@ -66,16 +66,15 @@
     }
   ],
   "saves": [
-    "{install}/PokiNative/build/profile/save",
-    "{install}/build/profile/save"
+    "{install}/../KarPur/build/profile/save"
   ],
   "folders": {
     "logs": [
       {
-        "path": "{install}/PokiNative/launcher.log",
-        "if": "{install}/PokiNative/build/game/karpur.exe"
+        "path": "{install}/KarPur/launcher.log",
+        "if": "{install}/KarPur/build/game/karpur.exe"
       },
-      { "path": "{install}/PokiNative/build/game/logs", "if": "{install}/KarPur/build/game/karpur.exe" },
+      { "path": "{install}/KarPur/build/game/logs", "if": "{install}/KarPur/build/game/karpur.exe" },
       { "path": "{install}/build/game/logs" },
       { "path": "{install}/launcher-linux.log" }
     ]

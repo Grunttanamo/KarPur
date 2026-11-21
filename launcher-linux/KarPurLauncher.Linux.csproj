@@ -5,8 +5,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>KarPur-Launcher-Linux</AssemblyName>
+    <AssemblyTitle>PokiNative Launcher</AssemblyTitle>
+    <Product>PokiNative Launcher</Product>
     <RootNamespace>KarPurLinux</RootNamespace>
-    <Version>0.4.0</Version>
+    <Version>0.4.5</Version>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>false</PublishSingleFile>
     <InvariantGlobalization>false</InvariantGlobalization>

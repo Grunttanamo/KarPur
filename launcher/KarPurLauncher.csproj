@@ -9,6 +9,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>KarPur-Launcher</AssemblyName>
+    <AssemblyTitle>PokiNative Launcher</AssemblyTitle>
+    <Product>PokiNative Launcher</Product>
     <RootNamespace>KarPurLauncher</RootNamespace>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
@@ -21,7 +23,7 @@
          ICU itself, so nothing is bundled for this. -->
     <InvariantGlobalization>false</InvariantGlobalization>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <Version>0.4.0</Version>
+    <Version>0.4.5</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- WFO1000: designer serialization of control properties; the launcher builds its controls in code -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
